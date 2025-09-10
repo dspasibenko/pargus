@@ -1,0 +1,21 @@
+.DS_Store
+.idea/
+.vscode/
+.cache/
+.clangd
+build/
+data/
+testdata/
+*-backups/
+messages
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.o
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
