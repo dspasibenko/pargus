@@ -26,7 +26,7 @@ For example, in argus-p.pa:
 ```
 device argus-p
 ```
-The file describes the API for "argus-p". Only one directive is allowed.
+The file describes the API for "argus-p". Only one directive is allowed. In paranthe
 
 ### register directive
 A register directive describes a register that can be read from or written to for the device. 
@@ -102,7 +102,7 @@ The following simple types are supported:
 
 Complex types:
 - [x]int8 - fixed-size array of x bytes, where x is a constant like `5`
-- [<base type - unsigned integer>]int8 - variable-length array, where the size will be 1 byte in length and passed with the field as `array_field_name_size`.
+- [field_or_bitmask_ref]int8 - variable-length array, where the size will be the size of the provided field in length. The 2 important things here: (1) the field must be declared before the variable array. (2) the field could be a bit mask, so just 1 or few bits long, in this case the name will be <fieldname_bitmaskname>. The variable size array should be marshalled and unmarshalled into the field. 
 - uint8{bit_X : 0, three_bits_val: 1-3 ...} - a bit field. In the bit field, after the bit-field name (colon), follows either the bit number or the bit range for the field. 
 
 Example:

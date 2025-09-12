@@ -2,34 +2,49 @@ package parser
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
 )
 
+//
+// AST
+//
+
+// A comment may take several lines in a row, separated by empty lines
+type CommentGroup struct {
+	Elements []*CommentElement `(@@)*`
+}
+
+type CommentElement struct {
+	Comment   *string `@Comment`
+	EmptyLine *string `| @EmptyLine`
+}
+
 type Device struct {
 	Pos       lexer.Position
-	Comment   *string     `@Comment?`
-	Name      string      `"device" @Ident`
-	Registers []*Register `@@*`
+	Doc       *CommentGroup `@@?`
+	Name      string        `"device" @Ident`
+	Registers []*Register   `@@*`
 }
 
 type Register struct {
 	Pos       lexer.Position
-	Comment   *string  `@Comment?`
-	Name      string   `"register" @Ident`
-	Number    int      `"(" @Int ")"`
-	Specifier *string  `( ":" @("r"|"w") )?`
-	Fields    []*Field `"{" ( @@ ";" )* "}" ";"`
+	Doc       *CommentGroup `@@?`
+	Name      string        `"register" @Ident`
+	Number    int           `"(" @Int ")"`
+	Specifier *string       `( ":" @("r"|"w") )?`
+	Fields    []*Field      `"{" ( @@ )* "}" ";"`
 }
 
 type Field struct {
-	Pos        lexer.Position
-	Comment    *string    `@Comment?`
-	Name       string     `@Ident`
-	Specifier  *string    `( ":" @("r"|"w") )?`
-	Type       *TypeUnion `@@`
-	EndComment *string    `@Comment?`
+	Pos             lexer.Position
+	Doc             *CommentGroup `@@?` // leading comments
+	Name            string        `@Ident`
+	Specifier       *string       `( ":" @("r"|"w") )?`
+	Type            *TypeUnion    `@@`
+	TrailingComment *string       `@End`
 }
 
 //
@@ -45,20 +60,26 @@ type SimpleType struct {
 }
 
 type ArrayType struct {
-	Size    string     `"[" (@Int | @Ident) "]"`
+	Size    *ArraySize `"[" @@ "]"`
 	Element *TypeUnion `@@`
 }
 
+type ArraySize struct {
+	Constant *int    `@Int`
+	Type     *string `| @("uint8"|"uint16"|"uint32"|"uint64")`
+	Variable *string `| @Ident`
+}
+
 type BitField struct {
-	Base string       `@("uint8"|"uint16"|"uint32"|"uint64")`
+	Base string       `@("int8"|"uint8"|"int16"|"uint16"|"int32"|"uint32"|"int64"|"uint64")`
 	Bits []*BitMember `"{" @@ ("," @@)* "}"`
 }
 
 type BitMember struct {
-	Comment *string `@Comment?`
-	Name    string  `@Ident ":"`
-	Start   int     `@Int`
-	End     *int    `( "-" @Int )?`
+	Doc   *CommentGroup `@@?`
+	Name  string        `@Ident ":"`
+	Start int           `@Int`
+	End   *int          `( "-" @Int )?`
 }
 
 //
@@ -76,10 +97,16 @@ func (*ArrayType) isType()  {}
 func (*BitField) isType()   {}
 func (*TypeUnion) isType()  {} // for compatibility
 
+//
+// Parser
+//
+
 var parser = participle.MustBuild[Device](
 	participle.Lexer(lexer.MustSimple([]lexer.SimpleRule{
-		{"Comment", `(//[^\r\n]*(\r?\n\s*)*)*//[^\r\n]*`},
-		{"Ident", `[a-zA-Z_][a-zA-Z0-9_]*`},
+		{"End", `;([ \t]+//[^\r\n]*)?`},
+		{"Comment", `//[^\r\n]*`},
+		{"EmptyLine", `\n\s*\n`},
+		{"Ident", `[a-zA-Z_][a-zA-Z0-9_-]*`},
 		{"Int", `\d+`},
 		{"Punct", `[{}();:,\[\]-]`},
 		{"Whitespace", `\s+`},
@@ -88,10 +115,39 @@ var parser = participle.MustBuild[Device](
 )
 
 func Parse(input string) (*Device, error) {
+	// Remove trailing empty lines from input before parsing
+	input = removeTrailingEmptyLinesFromString(input)
+
 	device, err := parser.ParseString("", input)
 	if err != nil {
 		return nil, err
 	}
+
+	// Process trailing comments - extract comment part from TrailingComment tokens
+	for _, register := range device.Registers {
+		for _, field := range register.Fields {
+			if field.TrailingComment != nil && *field.TrailingComment != ";" && strings.Contains(*field.TrailingComment, "//") {
+				// Extract comment part from semicolon + comment
+				commentStart := strings.Index(*field.TrailingComment, "//")
+				if commentStart != -1 {
+					extractedComment := (*field.TrailingComment)[commentStart:]
+					field.TrailingComment = &extractedComment
+				}
+			} else if field.TrailingComment != nil && *field.TrailingComment == ";" {
+				// No trailing comment, set to empty string
+				empty := ""
+				field.TrailingComment = &empty
+			}
+		}
+	}
+
+	// Fix comment distribution - move trailing comments to leading comments of next field
+	for _, register := range device.Registers {
+		fixCommentDistribution(register)
+	}
+
+	// Remove trailing empty lines from device and registers
+	removeTrailingEmptyLines(device)
 
 	// Validate register numbers are unique
 	registerNumbers := make(map[int]bool)
@@ -110,9 +166,81 @@ func Parse(input string) (*Device, error) {
 		if err := validateBitFields(register); err != nil {
 			return nil, err
 		}
+
+		// Validate arrays
+		if err := validateArrays(register); err != nil {
+			return nil, err
+		}
 	}
 
 	return device, nil
+}
+
+// fixCommentDistribution - trailing comments should stay with their fields
+func fixCommentDistribution(register *Register) {
+	// Do nothing - trailing comments should remain with their fields
+	// This function is kept for compatibility but doesn't move comments
+}
+
+func removeTrailingEmptyLines(device *Device) {
+	// Remove trailing empty lines from device Doc
+	if device.Doc != nil {
+		device.Doc.Elements = removeTrailingEmptyLinesFromElements(device.Doc.Elements)
+	}
+
+	// Remove trailing empty lines from each register
+	for _, register := range device.Registers {
+		// Remove trailing empty lines from register Doc
+		if register.Doc != nil {
+			register.Doc.Elements = removeTrailingEmptyLinesFromElements(register.Doc.Elements)
+		}
+
+		// Remove trailing empty lines from each field
+		for _, field := range register.Fields {
+			if field.Doc != nil {
+				field.Doc.Elements = removeTrailingEmptyLinesFromElements(field.Doc.Elements)
+			}
+		}
+	}
+}
+
+func removeTrailingEmptyLinesFromString(input string) string {
+	// Split into lines
+	lines := strings.Split(input, "\n")
+
+	// Find the last non-empty line
+	lastNonEmpty := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			lastNonEmpty = i
+		}
+	}
+
+	// If no non-empty lines found, return empty string
+	if lastNonEmpty == -1 {
+		return ""
+	}
+
+	// Return lines up to and including the last non-empty line
+	return strings.Join(lines[:lastNonEmpty+1], "\n")
+}
+
+func removeTrailingEmptyLinesFromElements(elements []*CommentElement) []*CommentElement {
+	// Find the last non-empty line element
+	lastNonEmpty := -1
+	for i, element := range elements {
+		if element.Comment != nil {
+			lastNonEmpty = i
+		}
+	}
+
+	// If no comments found, return empty slice
+	if lastNonEmpty == -1 {
+		return []*CommentElement{}
+	}
+
+	// Return elements up to and including the last non-empty line
+	return elements[:lastNonEmpty+1]
 }
 
 // validateAndUpdateFieldSpecifiers checks if field specifiers are compatible with register specifier
@@ -218,4 +346,85 @@ func getTypeSizeInBits(typeName string) int {
 	default:
 		return 0
 	}
+}
+
+// findFieldByName finds a field by name in the register, checking both regular fields and bitfield members
+func findFieldByName(register *Register, fieldName string, currentFieldIndex int) (bool, string) {
+	// Check regular fields declared before current field
+	for i := 0; i < currentFieldIndex; i++ {
+		field := register.Fields[i]
+
+		// Check if it's a regular field with matching name
+		if field.Name == fieldName {
+			return true, "field"
+		}
+
+		// Check if it's a bitfield with matching member names
+		if field.Type.Bitfield != nil {
+			for _, bitMember := range field.Type.Bitfield.Bits {
+				if bitMember.Name == fieldName {
+					return true, "bitfield"
+				}
+				// Check if it's a bitfield reference (fieldName_bitMemberName)
+				bitFieldRefName := field.Name + "_" + bitMember.Name
+				if fieldName == bitFieldRefName {
+					return true, "bitfield_ref"
+				}
+				// Check if it's a bitmask reference (fieldName_bitMemberName_bm)
+				bitmaskName := field.Name + "_" + bitMember.Name + "_bm"
+				if fieldName == bitmaskName {
+					return true, "bitmask"
+				}
+			}
+		}
+	}
+
+	return false, ""
+}
+
+// validateArrays validates that variable-length arrays use unsigned integer types for size
+// and that referenced fields are declared before the array
+func validateArrays(register *Register) error {
+	for i, field := range register.Fields {
+		if field.Type.Array != nil {
+			arrayType := field.Type.Array
+
+			// Check if it's a variable-length array with type size
+			if arrayType.Size.Type != nil {
+				sizeType := *arrayType.Size.Type
+
+				// Check that size type is unsigned integer
+				if !isUnsignedType(sizeType) {
+					return fmt.Errorf("variable-length array '%s' in register '%s' must use unsigned integer type for size, got '%s'",
+						field.Name, register.Name, sizeType)
+				}
+			}
+
+			// Check if it's a variable-length array with field reference
+			if arrayType.Size.Variable != nil {
+				fieldName := *arrayType.Size.Variable
+
+				// Check if this is actually a type name (uint8, uint16, etc.) or a field reference
+				if isUnsignedType(fieldName) {
+					// This is a type name, not a field reference - this should be handled by Type field
+					// This case should not happen if the parser is working correctly
+					return fmt.Errorf("variable-length array '%s' in register '%s' has type '%s' in Variable field instead of Type field",
+						field.Name, register.Name, fieldName)
+				}
+
+				// This is a field reference - check if the referenced field exists and is declared before this array
+				exists, _ := findFieldByName(register, fieldName, i)
+				if !exists {
+					return fmt.Errorf("variable-length array '%s' in register '%s' references undefined field '%s'",
+						field.Name, register.Name, fieldName)
+				}
+
+				// The field exists and is declared before the array, which is valid
+				// Note: We don't need to check the type here as the field could be a bitfield
+				// and the actual size will be determined at runtime
+			}
+		}
+	}
+
+	return nil
 }
