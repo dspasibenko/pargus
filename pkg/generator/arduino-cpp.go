@@ -154,7 +154,7 @@ func GenerateCpp(dev *parser.Device, namespace string) (string, error) {
 
 			switch {
 			case f.Type.Bitfield != nil:
-				base := f.Type.Bitfield.Base
+				base := toCppTypes(f.Type.Bitfield.Base)
 				cf.Decl = fmt.Sprintf("%s %s;", base, f.Name)
 				for _, bm := range f.Type.Bitfield.Bits {
 					start, _ := strconv.Atoi(bm.Start)
@@ -165,8 +165,14 @@ func GenerateCpp(dev *parser.Device, namespace string) (string, error) {
 					mask := bitMask(start, end)
 					cf.BitMasks = append(cf.BitMasks,
 						fmt.Sprintf("static constexpr %s %s_%s_bm = 0x%X;",
-							toCppTypes(base), f.Name, bm.Name, mask))
+							base, f.Name, bm.Name, mask))
 				}
+				cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("if (offset + sizeof(%s) <= size) {", base))
+				cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("    offset += bigendian::encode(buf + offset, %s);", f.Name))
+				cf.SendReadWriteData = append(cf.SendReadWriteData, "}")
+				cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, fmt.Sprintf("if (offset + sizeof(%s) <= size) {", base))
+				cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, fmt.Sprintf("    offset += bigendian::decode(%s, buf + offset);", f.Name))
+				cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, "}")
 
 			case f.Type.Array != nil:
 				elem := toCppTypes(f.Type.Array.Type.Name)
