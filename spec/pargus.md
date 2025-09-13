@@ -110,10 +110,12 @@ Example:
 register R1(2) {
     some_int int32;
     fixed_size_array [3]int16;
-    string [uint8]uint8; // the size of the field will be in string_size
-    // we cannot declare field string_size here, because the size for the string array is already generated
+    string [some_int]uint8; // the size of the field will be in some_int 
+    
     bit_field uint8{bit0: 0, bit57: 5-7};
+    another_buf[bit_field_bit57]float32; // variable array with the size encoded into the bit field
 }
 ```
 
 Bit fields can only be unsigned integer types. The number of bits cannot exceed the size of the bit-field type. 
+

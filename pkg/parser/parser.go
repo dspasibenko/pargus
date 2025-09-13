@@ -2,10 +2,12 @@ package parser
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
+	"github.com/dspasibenko/pargus/pkg/golibs/cast"
 )
 
 //
@@ -33,8 +35,8 @@ type Register struct {
 	Pos       lexer.Position
 	Doc       *CommentGroup `@@?`
 	Name      string        `"register" @Ident`
-	Number    int           `"(" @Int ")"`
-	Specifier *string       `( ":" @("r"|"w") )?`
+	NumberStr string        `"(" @Int ")"`
+	Specifier string        `( ":" @("r"|"w") )?`
 	Fields    []*Field      `"{" ( @@ )* "}" ";"`
 }
 
@@ -42,7 +44,7 @@ type Field struct {
 	Pos             lexer.Position
 	Doc             *CommentGroup `@@?` // leading comments
 	Name            string        `@Ident`
-	Specifier       *string       `( ":" @("r"|"w") )?`
+	Specifier       string        `( ":" @("r"|"w") )?`
 	Type            *TypeUnion    `@@`
 	TrailingComment *string       `@End`
 }
@@ -60,26 +62,25 @@ type SimpleType struct {
 }
 
 type ArrayType struct {
-	Size    *ArraySize `"[" @@ "]"`
-	Element *TypeUnion `@@`
+	Size ArraySize  `"[" @@ "]"`
+	Type SimpleType `@@`
 }
 
 type ArraySize struct {
-	Constant *int    `@Int`
-	Type     *string `| @("uint8"|"uint16"|"uint32"|"uint64")`
+	Constant *string `@Int`
 	Variable *string `| @Ident`
 }
 
 type BitField struct {
-	Base string       `@("int8"|"uint8"|"int16"|"uint16"|"int32"|"uint32"|"int64"|"uint64")`
-	Bits []*BitMember `"{" @@ ("," @@)* "}"`
+	Base string      `@("uint8"|"uint16"|"uint32"|"uint64")`
+	Bits []BitMember `"{" @@ ("," @@)* "}"`
 }
 
 type BitMember struct {
 	Doc   *CommentGroup `@@?`
 	Name  string        `@Ident ":"`
-	Start int           `@Int`
-	End   *int          `( "-" @Int )?`
+	Start string        `@Int`
+	End   *string       `( "-" @Int )?`
 }
 
 //
@@ -107,7 +108,7 @@ var parser = participle.MustBuild[Device](
 		{"Comment", `//[^\r\n]*`},
 		{"EmptyLine", `\n\s*\n`},
 		{"Ident", `[a-zA-Z_][a-zA-Z0-9_-]*`},
-		{"Int", `\d+`},
+		{"Int", `0[xX][0-9a-fA-F]+|0[bB][01]+|\d+`},
 		{"Punct", `[{}();:,\[\]-]`},
 		{"Whitespace", `\s+`},
 	})),
@@ -115,8 +116,8 @@ var parser = participle.MustBuild[Device](
 )
 
 func Parse(input string) (*Device, error) {
-	// Remove trailing empty lines from input before parsing
-	input = removeTrailingEmptyLinesFromString(input)
+	// trim the input
+	input = trimString(input)
 
 	device, err := parser.ParseString("", input)
 	if err != nil {
@@ -126,49 +127,40 @@ func Parse(input string) (*Device, error) {
 	// Process trailing comments - extract comment part from TrailingComment tokens
 	for _, register := range device.Registers {
 		for _, field := range register.Fields {
-			if field.TrailingComment != nil && *field.TrailingComment != ";" && strings.Contains(*field.TrailingComment, "//") {
-				// Extract comment part from semicolon + comment
-				commentStart := strings.Index(*field.TrailingComment, "//")
-				if commentStart != -1 {
-					extractedComment := (*field.TrailingComment)[commentStart:]
-					field.TrailingComment = &extractedComment
-				}
-			} else if field.TrailingComment != nil && *field.TrailingComment == ";" {
-				// No trailing comment, set to empty string
-				empty := ""
-				field.TrailingComment = &empty
+			if field.TrailingComment == nil {
+				continue
 			}
+			commentStart := strings.Index(*field.TrailingComment, "//")
+			if commentStart == -1 {
+				field.TrailingComment = cast.StringPtr("")
+				continue
+			}
+			extractedComment := (*field.TrailingComment)[commentStart:]
+			field.TrailingComment = cast.StringPtr(extractedComment)
 		}
 	}
-
-	// Fix comment distribution - move trailing comments to leading comments of next field
-	for _, register := range device.Registers {
-		fixCommentDistribution(register)
-	}
-
-	// Remove trailing empty lines from device and registers
-	removeTrailingEmptyLines(device)
 
 	// Validate register numbers are unique
-	registerNumbers := make(map[int]bool)
-	for _, register := range device.Registers {
-		if registerNumbers[register.Number] {
-			return nil, fmt.Errorf("duplicate register number %d", register.Number)
+	registerNumbers := make(map[int64]bool)
+	for _, r := range device.Registers {
+		val := r.Number()
+		if registerNumbers[val] {
+			return nil, fmt.Errorf("duplicate register number %d", val)
 		}
-		registerNumbers[register.Number] = true
+		registerNumbers[val] = true
 
 		// Validate field specifiers compatibility with register specifier
-		if err := validateAndUpdateFieldSpecifiers(register); err != nil {
+		if err := r.validateAndUpdateFieldSpecifiers(); err != nil {
 			return nil, err
 		}
 
 		// Validate bit fields
-		if err := validateBitFields(register); err != nil {
+		if err := r.validateBitFields(); err != nil {
 			return nil, err
 		}
 
 		// Validate arrays
-		if err := validateArrays(register); err != nil {
+		if err := r.validateArrays(); err != nil {
 			return nil, err
 		}
 	}
@@ -176,43 +168,19 @@ func Parse(input string) (*Device, error) {
 	return device, nil
 }
 
-// fixCommentDistribution - trailing comments should stay with their fields
-func fixCommentDistribution(register *Register) {
-	// Do nothing - trailing comments should remain with their fields
-	// This function is kept for compatibility but doesn't move comments
-}
-
-func removeTrailingEmptyLines(device *Device) {
-	// Remove trailing empty lines from device Doc
-	if device.Doc != nil {
-		device.Doc.Elements = removeTrailingEmptyLinesFromElements(device.Doc.Elements)
-	}
-
-	// Remove trailing empty lines from each register
-	for _, register := range device.Registers {
-		// Remove trailing empty lines from register Doc
-		if register.Doc != nil {
-			register.Doc.Elements = removeTrailingEmptyLinesFromElements(register.Doc.Elements)
-		}
-
-		// Remove trailing empty lines from each field
-		for _, field := range register.Fields {
-			if field.Doc != nil {
-				field.Doc.Elements = removeTrailingEmptyLinesFromElements(field.Doc.Elements)
-			}
-		}
-	}
-}
-
-func removeTrailingEmptyLinesFromString(input string) string {
+func trimString(input string) string {
 	// Split into lines
 	lines := strings.Split(input, "\n")
 
+	firstNonEmpty := -1
 	// Find the last non-empty line
 	lastNonEmpty := -1
 	for i, line := range lines {
 		if strings.TrimSpace(line) != "" {
 			lastNonEmpty = i
+			if firstNonEmpty == -1 {
+				firstNonEmpty = i
+			}
 		}
 	}
 
@@ -225,48 +193,38 @@ func removeTrailingEmptyLinesFromString(input string) string {
 	return strings.Join(lines[:lastNonEmpty+1], "\n")
 }
 
-func removeTrailingEmptyLinesFromElements(elements []*CommentElement) []*CommentElement {
-	// Find the last non-empty line element
-	lastNonEmpty := -1
-	for i, element := range elements {
-		if element.Comment != nil {
-			lastNonEmpty = i
-		}
+func (r *Register) Number() int64 {
+	val, err := strconv.ParseInt(r.NumberStr, 0, 64)
+	if err != nil {
+		panic(fmt.Sprintf("invalid register number %s", r.NumberStr))
 	}
-
-	// If no comments found, return empty slice
-	if lastNonEmpty == -1 {
-		return []*CommentElement{}
-	}
-
-	// Return elements up to and including the last non-empty line
-	return elements[:lastNonEmpty+1]
+	return val
 }
 
 // validateAndUpdateFieldSpecifiers checks if field specifiers are compatible with register specifier
-func validateAndUpdateFieldSpecifiers(register *Register) error {
-	registerSpec := register.Specifier
+func (r *Register) validateAndUpdateFieldSpecifiers() error {
+	registerSpec := r.Specifier
 	// If register has no specifier, field can have any specifier or none
-	if registerSpec == nil {
+	if registerSpec == "" {
 		return nil
 	}
 
-	for _, field := range register.Fields {
+	for _, field := range r.Fields {
 		fieldSpec := field.Specifier
 
 		// If field has no specifier, it inherits register specifier (valid)
-		if fieldSpec == nil {
+		if fieldSpec == "" {
 			field.Specifier = registerSpec // inherit register specifier
 			continue
 		}
 
 		// Check compatibility
-		if *registerSpec == "r" && *fieldSpec == "w" {
-			return fmt.Errorf("field '%s' in register '%s' cannot be write-only because register is read-only", field.Name, register.Name)
+		if registerSpec == "r" && fieldSpec == "w" {
+			return fmt.Errorf("field '%s' in register '%s' cannot be write-only because register is read-only", field.Name, r.Name)
 		}
 
-		if *registerSpec == "w" && *fieldSpec == "r" {
-			return fmt.Errorf("field '%s' in register '%s' cannot be read-only because register is write-only", field.Name, register.Name)
+		if registerSpec == "w" && fieldSpec == "r" {
+			return fmt.Errorf("field '%s' in register '%s' cannot be read-only because register is write-only", field.Name, r.Name)
 		}
 	}
 
@@ -275,15 +233,15 @@ func validateAndUpdateFieldSpecifiers(register *Register) error {
 
 // validateBitFields validates that bit fields use only unsigned integer types
 // and that bit ranges don't exceed the size of the base type
-func validateBitFields(register *Register) error {
-	for _, field := range register.Fields {
+func (r *Register) validateBitFields() error {
+	for _, field := range r.Fields {
 		if field.Type.Bitfield != nil {
 			bitField := field.Type.Bitfield
 
 			// Check that base type is unsigned
 			if !isUnsignedType(bitField.Base) {
 				return fmt.Errorf("bit field '%s' in register '%s' must use unsigned integer type, got '%s'",
-					field.Name, register.Name, bitField.Base)
+					field.Name, r.Name, bitField.Base)
 			}
 
 			// Get the size of the base type in bits
@@ -291,35 +249,49 @@ func validateBitFields(register *Register) error {
 
 			// Validate each bit member
 			for _, bitMember := range bitField.Bits {
-				var endBit int
-				if bitMember.End != nil {
-					endBit = *bitMember.End
-				} else {
-					endBit = bitMember.Start
-				}
+				endBit := bitMember.EndBit()
 
 				// Check that bit range doesn't exceed base type size
 				if endBit >= baseTypeBits {
-					return fmt.Errorf("bit field '%s' in register '%s': bit range %d-%d exceeds size of base type '%s' (%d bits)",
-						field.Name, register.Name, bitMember.Start, endBit, bitField.Base, baseTypeBits)
+					return fmt.Errorf("bit field '%s' in register '%s': bit range %s-%d exceeds size of base type '%s' (%d bits)",
+						field.Name, r.Name, bitMember.Start, &endBit, bitField.Base, baseTypeBits)
 				}
 
 				// Check that start bit is not negative
-				if bitMember.Start < 0 {
-					return fmt.Errorf("bit field '%s' in register '%s': bit position cannot be negative, got %d",
-						field.Name, register.Name, bitMember.Start)
+				if bitMember.StartBit() < 0 {
+					return fmt.Errorf("bit field '%s' in register '%s': bit position cannot be negative, got %s",
+						field.Name, r.Name, bitMember.Start)
 				}
 
 				// Check that start <= end
-				if bitMember.Start > endBit {
-					return fmt.Errorf("bit field '%s' in register '%s': start bit %d cannot be greater than end bit %d",
-						field.Name, register.Name, bitMember.Start, endBit)
+				if bitMember.StartBit() > endBit {
+					return fmt.Errorf("bit field '%s' in register '%s': start bit %s cannot be greater than end bit %d",
+						field.Name, r.Name, bitMember.Start, endBit)
 				}
 			}
 		}
 	}
 
 	return nil
+}
+
+func (bm *BitMember) EndBit() int {
+	if bm.End != nil {
+		val, err := strconv.ParseInt(*bm.End, 0, 64)
+		if err != nil {
+			panic(fmt.Sprintf("invalid bit member end %s", *bm.End))
+		}
+		return int(val)
+	}
+	return bm.StartBit()
+}
+
+func (bm *BitMember) StartBit() int {
+	val, err := strconv.ParseInt(bm.Start, 0, 64)
+	if err != nil {
+		panic(fmt.Sprintf("invalid bit member start %s", bm.Start))
+	}
+	return int(val)
 }
 
 // isUnsignedType checks if a type is an unsigned integer type
@@ -348,83 +320,55 @@ func getTypeSizeInBits(typeName string) int {
 	}
 }
 
-// findFieldByName finds a field by name in the register, checking both regular fields and bitfield members
-func findFieldByName(register *Register, fieldName string, currentFieldIndex int) (bool, string) {
+// FindFieldByName finds a field by name in the register, checking both regular fields and bitfield members
+func (r *Register) FindFieldByName(fieldName string, currentFieldIndex int) (*Field, *BitMember) {
 	// Check regular fields declared before current field
 	for i := 0; i < currentFieldIndex; i++ {
-		field := register.Fields[i]
+		field := r.Fields[i]
 
 		// Check if it's a regular field with matching name
-		if field.Name == fieldName {
-			return true, "field"
+		if field.Name == fieldName && field.Type.Simple != nil {
+			return field, nil
 		}
 
 		// Check if it's a bitfield with matching member names
 		if field.Type.Bitfield != nil {
 			for _, bitMember := range field.Type.Bitfield.Bits {
-				if bitMember.Name == fieldName {
-					return true, "bitfield"
-				}
 				// Check if it's a bitfield reference (fieldName_bitMemberName)
 				bitFieldRefName := field.Name + "_" + bitMember.Name
 				if fieldName == bitFieldRefName {
-					return true, "bitfield_ref"
-				}
-				// Check if it's a bitmask reference (fieldName_bitMemberName_bm)
-				bitmaskName := field.Name + "_" + bitMember.Name + "_bm"
-				if fieldName == bitmaskName {
-					return true, "bitmask"
+					return field, &bitMember
 				}
 			}
 		}
 	}
 
-	return false, ""
+	return nil, nil
 }
 
 // validateArrays validates that variable-length arrays use unsigned integer types for size
 // and that referenced fields are declared before the array
-func validateArrays(register *Register) error {
-	for i, field := range register.Fields {
-		if field.Type.Array != nil {
-			arrayType := field.Type.Array
+func (r *Register) validateArrays() error {
+	for i, field := range r.Fields {
+		if field.Type.Array == nil {
+			continue
+		}
+		arrayType := field.Type.Array
 
-			// Check if it's a variable-length array with type size
-			if arrayType.Size.Type != nil {
-				sizeType := *arrayType.Size.Type
+		if arrayType.Size.Variable == nil {
+			// this is a constant-length array
+			continue
+		}
 
-				// Check that size type is unsigned integer
-				if !isUnsignedType(sizeType) {
-					return fmt.Errorf("variable-length array '%s' in register '%s' must use unsigned integer type for size, got '%s'",
-						field.Name, register.Name, sizeType)
-				}
-			}
+		// Check if it's a variable-length array with field reference
+		fieldName := cast.String(arrayType.Size.Variable, "")
 
-			// Check if it's a variable-length array with field reference
-			if arrayType.Size.Variable != nil {
-				fieldName := *arrayType.Size.Variable
-
-				// Check if this is actually a type name (uint8, uint16, etc.) or a field reference
-				if isUnsignedType(fieldName) {
-					// This is a type name, not a field reference - this should be handled by Type field
-					// This case should not happen if the parser is working correctly
-					return fmt.Errorf("variable-length array '%s' in register '%s' has type '%s' in Variable field instead of Type field",
-						field.Name, register.Name, fieldName)
-				}
-
-				// This is a field reference - check if the referenced field exists and is declared before this array
-				exists, _ := findFieldByName(register, fieldName, i)
-				if !exists {
-					return fmt.Errorf("variable-length array '%s' in register '%s' references undefined field '%s'",
-						field.Name, register.Name, fieldName)
-				}
-
-				// The field exists and is declared before the array, which is valid
-				// Note: We don't need to check the type here as the field could be a bitfield
-				// and the actual size will be determined at runtime
-			}
+		// This is a field reference - check if the referenced field exists and is declared before this array
+		exists, _ := r.FindFieldByName(fieldName, i)
+		if exists == nil {
+			return fmt.Errorf("variable-length array '%s' in register '%s' references undefined field '%s'",
+				field.Name, r.Name, fieldName)
 		}
 	}
-
 	return nil
 }
