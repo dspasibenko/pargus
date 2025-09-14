@@ -15,6 +15,9 @@ import (
 //
 
 const cppTemplate = `
+#ifndef __{{.Identifier}}__
+#define __{{.Identifier}}__
+
 #include <Arduino.h>
 #include "bigendian.h"
  
@@ -41,13 +44,14 @@ struct {{.Name}} {
     {{- end}}
     {{.Decl}}{{if .Trailing}} {{.Trailing}}{{end}}
 {{- end}}
+    
     // Send read-only fields to wire (register read fields -> wire)
     int send_read_data(uint8_t* buf, size_t size) {
         int offset = 0;
 {{- range .Fields}}
 {{- if .IsReadable}}
-	{{range .SendReadWriteData}}{{.}}
-	{{end -}}
+        {{range .SendReadWriteData}}{{.}}
+        {{end -}}
 {{- end}}
 {{- end}}
         return offset;
@@ -58,40 +62,40 @@ struct {{.Name}} {
         int offset = 0;
 {{- range .Fields}}
 {{- if .IsWritable}}
-	{{range .SendReadWriteData}}{{.}}
-	{{end -}}
+        {{range .SendReadWriteData}}{{.}}
+        {{end -}}
 {{- end}}
 {{- end}}
         return offset;
     }
-
+    
     // Get read-only fields from wire (wire -> the register read fields)
     int receive_read_data(uint8_t* buf, size_t size) {
         int offset = 0;
 {{- range .Fields}}
 {{- if .IsReadable}}
-	{{range .ReceiveReadWriteData}}{{.}}
-	{{end -}}
+        {{range .ReceiveReadWriteData}}{{.}}
+        {{end -}}
 {{- end}}
 {{- end}}
         return offset;
-	}
+    }
 
     // Get write-only fields from wire (wire -> the register writable fields)
     int receive_write_data(uint8_t* buf, size_t size) {
         int offset = 0;
 {{- range .Fields}}
 {{- if .IsWritable}}
-	{{range .ReceiveReadWriteData}}{{.}}
-	{{end -}}
+        {{range .ReceiveReadWriteData}}{{.}}
+        {{end -}}
 {{- end}}
 {{- end}}
         return offset;
     }
 };
 {{- end}}
-
 } // namespace {{.Namespace}}
+#endif // __{{.Identifier}}__
 `
 
 //
@@ -99,9 +103,10 @@ struct {{.Name}} {
 //
 
 type CppDevice struct {
-	Doc       []string
-	Namespace string
-	Registers []CppRegister
+	Doc        []string
+	Namespace  string
+	Identifier string
+	Registers  []CppRegister
 }
 
 type CppRegister struct {
@@ -127,13 +132,13 @@ type CppField struct {
 // Public entry
 //
 
-func GenerateCpp(dev *parser.Device, namespace string) (string, error) {
+func GenerateCpp(dev *parser.Device, namespace, identifier string) (string, error) {
 	tpl, err := template.New("cpp").Parse(cppTemplate)
 	if err != nil {
 		return "", err
 	}
 
-	out := CppDevice{Namespace: namespace}
+	out := CppDevice{Namespace: namespace, Identifier: identifier}
 	out.Doc = flattenComments(dev.Doc)
 	for _, reg := range dev.Registers {
 		num, _ := strconv.ParseInt(reg.NumberStr, 0, 64)
@@ -189,7 +194,6 @@ func GenerateCpp(dev *parser.Device, namespace string) (string, error) {
 					cf.Decl = fmt.Sprintf("%s* %s;", elem, f.Name)
 					szFieldName := *f.Type.Array.Size.Variable
 					field, bm := reg.FindFieldByName(szFieldName, len(cr.Fields))
-					fmt.Println("szFieldName", szFieldName, "field", field, "bm", bm)
 					if bm != nil {
 						// this is the bit mask field
 						cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("{"))
@@ -221,7 +225,7 @@ func GenerateCpp(dev *parser.Device, namespace string) (string, error) {
 
 			case f.Type.Simple != nil:
 				elem := toCppTypes(f.Type.Simple.Name)
-				cf.Decl = fmt.Sprintf("%s %s;", f.Type.Simple.Name, f.Name)
+				cf.Decl = fmt.Sprintf("%s %s;", elem, f.Name)
 				cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("if (offset + sizeof(%s) <= size) {", elem))
 				cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("    offset += bigendian::encode(buf + offset, %s);", f.Name))
 				cf.SendReadWriteData = append(cf.SendReadWriteData, "}")
@@ -242,7 +246,7 @@ func GenerateCpp(dev *parser.Device, namespace string) (string, error) {
 	if err := tpl.Execute(&buf, out); err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(buf.String()), nil
+	return strings.TrimSpace(buf.String()) + "\n", nil
 }
 
 //
@@ -272,36 +276,6 @@ func toCppTypes(typ string) string {
 	case "float64":
 		return "double"
 	default:
-		return typ
+		return typ + "error"
 	}
-}
-
-func flattenComments(cg *parser.CommentGroup) []string {
-	if cg == nil {
-		return nil
-	}
-	var out []string
-	for _, e := range cg.Elements {
-		if e.Comment != nil {
-			out = append(out, *e.Comment)
-		}
-		if e.EmptyLine != nil {
-			out = append(out, "\n")
-		}
-	}
-	return out
-}
-
-func safeString(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-// bitMask builds a mask from [start..end] inclusive
-func bitMask(start, end int) uint64 {
-	width := end - start + 1
-	mask := (uint64(1)<<width - 1) << start
-	return mask
 }

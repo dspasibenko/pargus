@@ -2,11 +2,11 @@
 
 # Build the C++ generator executable
 build:
-	go build -o bin/pargus-cpp-generator ./cmd/pargus-cpp-generator
+	go build -o build/pargus ./cmd/pargus
 
 # Install the C++ generator to GOPATH/bin
 install:
-	go install ./cmd/pargus-cpp-generator
+	go install ./cmd/pargus
 
 # Run tests
 test:
@@ -14,7 +14,7 @@ test:
 
 # Clean build artifacts
 clean:
-	rm -rf bin/
+	rm -rf build/
 
 # Build and install
 all: build install
