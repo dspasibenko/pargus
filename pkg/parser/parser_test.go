@@ -15,7 +15,12 @@ device sensor
 
 register Control(1) {
     // Enable sensor
-    enable uint32{bit0: 0, mode: 1-3, high: 22-31};
+    enable uint32{
+		// bit0 comment
+		bit0: 0,
+		// mode comment
+		// line2
+		mode: 1-3, high: 22-31};
     // Temperature reading
     temperature int16;
 
@@ -71,6 +76,34 @@ register WriteOnly(3):w {
 	assert.Equal(t, "// Enable sensor", *enableField.Doc.Elements[0].Comment, "Enable field leading comment should match")
 	require.NotNil(t, enableField.TrailingComment, "Enable field should have trailing comment")
 	assert.Equal(t, "", *enableField.TrailingComment, "Enable field trailing comment should be empty")
+
+	// Test enable bitfield members
+	require.NotNil(t, enableField.Type, "Enable field should have type")
+	require.NotNil(t, enableField.Type.Bitfield, "Enable field should be a bitfield")
+	assert.Len(t, enableField.Type.Bitfield.Bits, 3, "Enable bitfield should have 3 bit members")
+
+	// Test bit0 member
+	bit0Member := enableField.Type.Bitfield.Bits[0]
+	assert.Equal(t, "bit0", bit0Member.Name, "First bit member name should be bit0")
+	require.NotNil(t, bit0Member.Doc, "bit0 should have comments")
+	assert.Len(t, bit0Member.Doc.Elements, 1, "bit0 should have 1 comment")
+	require.NotNil(t, bit0Member.Doc.Elements[0].Comment, "bit0 comment should exist")
+	assert.Equal(t, "// bit0 comment", *bit0Member.Doc.Elements[0].Comment, "bit0 comment should match")
+
+	// Test mode member
+	modeMember := enableField.Type.Bitfield.Bits[1]
+	assert.Equal(t, "mode", modeMember.Name, "Second bit member name should be mode")
+	require.NotNil(t, modeMember.Doc, "mode should have comments")
+	assert.Len(t, modeMember.Doc.Elements, 2, "mode should have 2 comments")
+	require.NotNil(t, modeMember.Doc.Elements[0].Comment, "First mode comment should exist")
+	assert.Equal(t, "// mode comment", *modeMember.Doc.Elements[0].Comment, "First mode comment should match")
+	require.NotNil(t, modeMember.Doc.Elements[1].Comment, "Second mode comment should exist")
+	assert.Equal(t, "// line2", *modeMember.Doc.Elements[1].Comment, "Second mode comment should match")
+
+	// Test high member
+	highMember := enableField.Type.Bitfield.Bits[2]
+	assert.Equal(t, "high", highMember.Name, "Third bit member name should be high")
+	assert.True(t, highMember.Doc == nil || len(highMember.Doc.Elements) == 0, "high should not have comments")
 
 	// Test temperature field
 	temperatureField := controlRegister.Fields[1]

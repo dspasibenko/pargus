@@ -66,3 +66,47 @@ func TestGenerateCpp(t *testing.T) {
 	require.NoError(t, err)
 	fmt.Println(res)
 }
+
+func TestGenerateCppWithBitfieldComments(t *testing.T) {
+	input := `
+    device sensor
+    
+    register Control(1) {
+        // Enable sensor
+        enable uint32{
+            // bit0 comment
+            bit0: 0,
+            // mode comment
+            // line2
+            mode: 1-3, high: 22-31};
+    };`
+
+	device, err := parser.Parse(input)
+	require.NoError(t, err)
+
+	res, err := GenerateCpp(device, "test", "test_h")
+	require.NoError(t, err)
+	fmt.Println(res)
+}
+
+func TestGenerateGoWithBitfieldComments(t *testing.T) {
+	input := `
+    device sensor
+    
+    register Control(1) {
+        // Enable sensor
+        enable uint32{
+            // bit0 comment
+            bit0: 0,
+            // mode comment
+            // line2
+            mode: 1-3, high: 22-31};
+    };`
+
+	device, err := parser.Parse(input)
+	require.NoError(t, err)
+
+	res, err := GenerateGo(device, "test")
+	require.NoError(t, err)
+	fmt.Println(res)
+}

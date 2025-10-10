@@ -36,10 +36,10 @@ static constexpr uint8_t Reg_{{.Name}}_ID = {{.Number}};
 {{end -}}
 struct {{.Name}} {
 {{- range .Fields}}
-    {{- range .Doc}}
+	{{- range .BitMasks}}
     {{.}}
     {{- end}}
-    {{- range .BitMasks}}
+    {{- range .Doc}}
     {{.}}
     {{- end}}
     {{.Decl}}{{if .Trailing}} {{.Trailing}}{{end}}
@@ -162,12 +162,26 @@ func GenerateCpp(dev *parser.Device, namespace, identifier string) (string, erro
 				base := toCppTypes(f.Type.Bitfield.Base)
 				cf.Decl = fmt.Sprintf("%s %s;", base, f.Name)
 				for _, bm := range f.Type.Bitfield.Bits {
+					// Add bit member comments
+					bmComments := flattenComments(bm.Doc)
+					for _, comment := range bmComments {
+						cf.BitMasks = append(cf.BitMasks, comment)
+					}
+
 					start, _ := strconv.Atoi(bm.Start)
 					end := start
 					if bm.End != nil {
 						end, _ = strconv.Atoi(*bm.End)
 					}
 					mask := bitMask(start, end)
+
+					// Add bit mask constant with range info in comment
+					bitRange := bm.Start
+					if bm.End != nil && *bm.End != bm.Start {
+						bitRange = fmt.Sprintf("%s-%s", bm.Start, *bm.End)
+					}
+					cf.BitMasks = append(cf.BitMasks,
+						fmt.Sprintf("// %s bit field (bits %s)", bm.Name, bitRange))
 					cf.BitMasks = append(cf.BitMasks,
 						fmt.Sprintf("static constexpr %s %s_%s_bm = 0x%X;",
 							base, f.Name, bm.Name, mask))
@@ -196,7 +210,7 @@ func GenerateCpp(dev *parser.Device, namespace, identifier string) (string, erro
 					field, bm := reg.FindFieldByName(szFieldName, len(cr.Fields))
 					if bm != nil {
 						// this is the bit mask field
-						cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("{"))
+						cf.SendReadWriteData = append(cf.SendReadWriteData, "{")
 						cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("    %s elems = (%s&%s)>>%d;", toCppTypes(field.Type.Bitfield.Base),
 							field.Name, fmt.Sprintf("%s_%s_bm", field.Name, bm.Name), bm.StartBit()))
 						cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("    if (offset + sizeof(%s)*elems <= size) {", elem))
@@ -204,7 +218,7 @@ func GenerateCpp(dev *parser.Device, namespace, identifier string) (string, erro
 						cf.SendReadWriteData = append(cf.SendReadWriteData, "    }")
 						cf.SendReadWriteData = append(cf.SendReadWriteData, "}")
 
-						cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, fmt.Sprintf("{"))
+						cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, "{")
 						cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, fmt.Sprintf("    %s elems = (%s&%s)>>%d;", toCppTypes(field.Type.Bitfield.Base),
 							field.Name, fmt.Sprintf("%s_%s_bm", field.Name, bm.Name), bm.StartBit()))
 						cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, fmt.Sprintf("    if (offset + sizeof(%s)*elems <= size) {", elem))

@@ -186,12 +186,26 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 				gf.Type = base
 				gf.Decl = fmt.Sprintf("%s %s", f.Name, base)
 				for _, bm := range f.Type.Bitfield.Bits {
+					// Add bit member comments
+					bmComments := flattenComments(bm.Doc)
+					for _, comment := range bmComments {
+						gf.BitMasks = append(gf.BitMasks, comment)
+					}
+
 					start, _ := strconv.Atoi(bm.Start)
 					end := start
 					if bm.End != nil {
 						end, _ = strconv.Atoi(*bm.End)
 					}
 					mask := bitMask(start, end)
+
+					// Add bit mask constant with range info in comment
+					bitRange := bm.Start
+					if bm.End != nil && *bm.End != bm.Start {
+						bitRange = fmt.Sprintf("%s-%s", bm.Start, *bm.End)
+					}
+					gf.BitMasks = append(gf.BitMasks,
+						fmt.Sprintf("// %s bit field (bits %s)", bm.Name, bitRange))
 					gf.BitMasks = append(gf.BitMasks,
 						fmt.Sprintf("const %s_%s_%s_bm %s = 0x%X", reg.Name,
 							f.Name, bm.Name, base, mask))
