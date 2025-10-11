@@ -183,6 +183,26 @@ func GenerateCpp(dev *parser.Device, namespace, identifier string) (string, erro
 			}
 
 			switch {
+			case f.Type.Simple != nil && f.Type.Simple.IsRegisterRef():
+				refRegName := f.Type.Simple.Name
+				cf.Decl = fmt.Sprintf("%s %s;", refRegName, f.Name)
+
+				// For RegisterRef, we need to call different methods depending on read/write context
+				// The template will filter by IsReadable/IsWritable
+				// For readable fields in send_read_data/receive_read_data
+				// For writable fields in send_write_data/receive_write_data
+				if cf.IsReadable {
+					cf.SendReadWriteData = append(cf.SendReadWriteData,
+						fmt.Sprintf("offset += %s.send_read_data(buf + offset, size - offset);", f.Name))
+					cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData,
+						fmt.Sprintf("offset += %s.receive_read_data(buf + offset, size - offset);", f.Name))
+				} else if cf.IsWritable {
+					cf.SendReadWriteData = append(cf.SendReadWriteData,
+						fmt.Sprintf("offset += %s.send_write_data(buf + offset, size - offset);", f.Name))
+					cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData,
+						fmt.Sprintf("offset += %s.receive_write_data(buf + offset, size - offset);", f.Name))
+				}
+
 			case f.Type.Bitfield != nil:
 				base := toCppTypes(f.Type.Bitfield.Base)
 				cf.Decl = fmt.Sprintf("%s %s;", base, f.Name)

@@ -125,10 +125,16 @@ Complex types:
   1. The field must be declared before the variable array
   2. The field can be a bit mask (just 1 or few bits long). In this case, the reference name will be `<fieldname_bitmaskname>`
 - `uint<N>{bit_name: bit_pos, ...}` - a bit field. After the bit-field name (colon), follows either the bit number or the bit range for the field
+- `<RegisterName>` - a reference to another register defined in the same file. This creates a field of the register's struct type. The referenced register must exist in the device definition. **Important:** Circular dependencies are not allowed (e.g., if register A contains a field of type B, then register B cannot contain a field of type A, directly or indirectly).
 
 Example:
 
 ```
+register Config(1) {
+    mode uint8;
+    enabled uint8;
+}
+
 register R1(2) {
     some_int int32;
     fixed_size_array [3]int16;
@@ -136,6 +142,8 @@ register R1(2) {
     
     bit_field uint8{bit0: 0, bit57: 5-7};
     another_buf [bit_field_bit57]float32; // variable array with the size encoded into the bit field
+    
+    config Config; // field with type of Config register
 }
 ```
 

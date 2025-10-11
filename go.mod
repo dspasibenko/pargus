@@ -1,10 +1,13 @@
 module github.com/dspasibenko/pargus
 
-go 1.23.3
+go 1.24.0
+
+toolchain go1.24.8
 
 require (
 	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/text v0.30.0
 )
 
 require (

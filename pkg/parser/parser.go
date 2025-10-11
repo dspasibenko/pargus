@@ -75,7 +75,7 @@ type Type interface {
 }
 
 type SimpleType struct {
-	Name string `@("int8"|"uint8"|"int16"|"uint16"|"int32"|"uint32"|"int64"|"uint64"|"float32"|"float64")`
+	Name string `@Ident`
 }
 
 type ArrayType struct {
@@ -135,6 +135,21 @@ var parser = participle.MustBuild[Device](
 	participle.UseLookahead(4),
 )
 
+// IsBuiltinType returns true if the type name is a built-in simple type
+func IsBuiltinType(typeName string) bool {
+	switch typeName {
+	case "int8", "uint8", "int16", "uint16", "int32", "uint32", "int64", "uint64", "float32", "float64":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsRegisterRef returns true if this SimpleType is actually a reference to a register
+func (st *SimpleType) IsRegisterRef() bool {
+	return !IsBuiltinType(st.Name)
+}
+
 func Parse(input string) (*Device, error) {
 	// trim the input
 	input = trimString(input)
@@ -183,6 +198,11 @@ func Parse(input string) (*Device, error) {
 		if err := r.validateArrays(); err != nil {
 			return nil, err
 		}
+	}
+
+	// Validate register references and check for circular dependencies
+	if err := device.validateRegisterReferences(); err != nil {
+		return nil, err
 	}
 
 	return device, nil
@@ -418,6 +438,83 @@ func (r *Register) validateArrays() error {
 		if exists == nil {
 			return fmt.Errorf("variable-length array '%s' in register '%s' references undefined field '%s'",
 				field.Name, r.Name, fieldName)
+		}
+	}
+	return nil
+}
+
+// validateRegisterReferences validates that all register references exist and there are no circular dependencies
+func (d *Device) validateRegisterReferences() error {
+	// Build a map of all registers
+	registerMap := make(map[string]*Register)
+	for _, reg := range d.Registers {
+		registerMap[reg.Name] = reg
+	}
+
+	// Validate that all referenced registers exist
+	for _, reg := range d.Registers {
+		for _, field := range reg.Body.Fields() {
+			if field.Type.Simple != nil && field.Type.Simple.IsRegisterRef() {
+				refName := field.Type.Simple.Name
+				if _, exists := registerMap[refName]; !exists {
+					return fmt.Errorf("field '%s' in register '%s' references undefined register '%s'",
+						field.Name, reg.Name, refName)
+				}
+			}
+		}
+	}
+
+	// Check for circular dependencies using DFS
+	for _, reg := range d.Registers {
+		visited := make(map[string]bool)
+		recursionStack := make(map[string]bool)
+		if hasCycle(reg.Name, registerMap, visited, recursionStack) {
+			return fmt.Errorf("circular dependency detected involving register '%s'", reg.Name)
+		}
+	}
+
+	return nil
+}
+
+// hasCycle performs DFS to detect cycles in register dependencies
+func hasCycle(regName string, registerMap map[string]*Register, visited, recursionStack map[string]bool) bool {
+	visited[regName] = true
+	recursionStack[regName] = true
+
+	reg, exists := registerMap[regName]
+	if !exists {
+		return false
+	}
+
+	// Check all fields for register references
+	for _, field := range reg.Body.Fields() {
+		if field.Type.Simple != nil && field.Type.Simple.IsRegisterRef() {
+			refName := field.Type.Simple.Name
+
+			// If we find a node in recursion stack, we have a cycle
+			if recursionStack[refName] {
+				return true
+			}
+
+			// If not visited, recursively check
+			if !visited[refName] {
+				if hasCycle(refName, registerMap, visited, recursionStack) {
+					return true
+				}
+			}
+		}
+	}
+
+	// Remove from recursion stack before returning
+	recursionStack[regName] = false
+	return false
+}
+
+// FindRegisterByName finds a register by name in the device
+func (d *Device) FindRegisterByName(name string) *Register {
+	for _, reg := range d.Registers {
+		if reg.Name == name {
+			return reg
 		}
 	}
 	return nil

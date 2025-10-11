@@ -196,3 +196,168 @@ register WriteOnly(3):w {
 	require.NotNil(t, writeOnlyField.TrailingComment, "WriteOnly field should have trailing comment")
 	assert.Equal(t, "// and the comment too", *writeOnlyField.TrailingComment, "WriteOnly field trailing comment should match")
 }
+
+func TestRegisterRef(t *testing.T) {
+	// Test basic register reference
+	input := `
+device test
+
+register Config(1) {
+    mode uint8;
+    enabled uint8;
+};
+
+register Main(2) {
+    id uint16;
+    config Config;
+    data [4]uint8;
+};
+`
+	device, err := Parse(input)
+	require.NoError(t, err)
+	require.Len(t, device.Registers, 2)
+
+	mainReg := device.Registers[1]
+	assert.Equal(t, "Main", mainReg.Name)
+	require.Len(t, mainReg.Body.Fields(), 3)
+
+	configField := mainReg.Body.Fields()[1]
+	assert.Equal(t, "config", configField.Name)
+	require.NotNil(t, configField.Type.Simple)
+	assert.Equal(t, "Config", configField.Type.Simple.Name)
+	assert.True(t, configField.Type.Simple.IsRegisterRef())
+}
+
+func TestRegisterRefUndefined(t *testing.T) {
+	// Test undefined register reference
+	input := `
+device test
+
+register Main(1) {
+    config UndefinedRegister;
+};
+`
+	_, err := Parse(input)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "references undefined register")
+}
+
+func TestRegisterRefCircularDependency(t *testing.T) {
+	// Test circular dependency detection
+	input := `
+device test
+
+register A(1) {
+    b B;
+};
+
+register B(2) {
+    a A;
+};
+`
+	_, err := Parse(input)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "circular dependency")
+}
+
+func TestRegisterRefIndirectCircularDependency(t *testing.T) {
+	// Test indirect circular dependency detection (A -> B -> C -> A)
+	input := `
+device test
+
+register A(1) {
+    b B;
+};
+
+register B(2) {
+    c C;
+};
+
+register C(3) {
+    a A;
+};
+`
+	_, err := Parse(input)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "circular dependency")
+}
+
+func TestRegisterRefValidChain(t *testing.T) {
+	// Test valid chain without circular dependency (A -> B -> C)
+	input := `
+device test
+
+register C(3) {
+    value uint32;
+};
+
+register B(2) {
+    c C;
+};
+
+register A(1) {
+    b B;
+};
+`
+	device, err := Parse(input)
+	require.NoError(t, err)
+	require.Len(t, device.Registers, 3)
+
+	// Find register A
+	var regA *Register
+	for _, reg := range device.Registers {
+		if reg.Name == "A" {
+			regA = reg
+			break
+		}
+	}
+	require.NotNil(t, regA)
+	require.Len(t, regA.Body.Fields(), 1)
+
+	bField := regA.Body.Fields()[0]
+	assert.Equal(t, "b", bField.Name)
+	require.NotNil(t, bField.Type.Simple)
+	assert.Equal(t, "B", bField.Type.Simple.Name)
+	assert.True(t, bField.Type.Simple.IsRegisterRef())
+}
+
+func TestRegisterRefWithReadWriteSpecifiers(t *testing.T) {
+	// Test register reference with read/write specifiers
+	input := `
+device test
+
+register Config(1) {
+    mode uint8;
+};
+
+register Main(2) {
+    read_config: r Config;
+    write_config: w Config;
+    rw_config Config;
+};
+`
+	device, err := Parse(input)
+	require.NoError(t, err)
+	require.Len(t, device.Registers, 2)
+
+	mainReg := device.Registers[1]
+	require.Len(t, mainReg.Body.Fields(), 3)
+
+	readConfigField := mainReg.Body.Fields()[0]
+	assert.Equal(t, "read_config", readConfigField.Name)
+	assert.Equal(t, "r", readConfigField.Specifier)
+	require.NotNil(t, readConfigField.Type.Simple)
+	assert.True(t, readConfigField.Type.Simple.IsRegisterRef())
+
+	writeConfigField := mainReg.Body.Fields()[1]
+	assert.Equal(t, "write_config", writeConfigField.Name)
+	assert.Equal(t, "w", writeConfigField.Specifier)
+	require.NotNil(t, writeConfigField.Type.Simple)
+	assert.True(t, writeConfigField.Type.Simple.IsRegisterRef())
+
+	rwConfigField := mainReg.Body.Fields()[2]
+	assert.Equal(t, "rw_config", rwConfigField.Name)
+	assert.Equal(t, "", rwConfigField.Specifier)
+	require.NotNil(t, rwConfigField.Type.Simple)
+	assert.True(t, rwConfigField.Type.Simple.IsRegisterRef())
+}

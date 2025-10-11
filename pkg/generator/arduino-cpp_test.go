@@ -110,3 +110,90 @@ func TestGenerateGoWithBitfieldComments(t *testing.T) {
 	require.NoError(t, err)
 	fmt.Println(res)
 }
+
+func TestGenerateCppWithRegisterRef(t *testing.T) {
+	input := `
+    device test
+    
+    register Config(1) {
+        mode uint8;
+        enabled uint8;
+    };
+    
+    register Main(2) {
+        id uint16;
+        // Configuration settings
+        config Config;
+        data [4]uint8;
+    };`
+
+	device, err := parser.Parse(input)
+	require.NoError(t, err)
+
+	res, err := GenerateCpp(device, "test", "test_h")
+	require.NoError(t, err)
+	fmt.Println(res)
+
+	// Verify that the generated code contains the register reference
+	require.Contains(t, res, "Config config;")
+	require.Contains(t, res, "offset += config.send_read_data(buf + offset, size - offset);")
+	require.Contains(t, res, "offset += config.receive_read_data(buf + offset, size - offset);")
+}
+
+func TestGenerateGoWithRegisterRef(t *testing.T) {
+	input := `
+    device test
+    
+    register Config(1) {
+        mode uint8;
+        enabled uint8;
+    };
+    
+    register Main(2) {
+        id uint16;
+        // Configuration settings
+        config Config;
+        data [4]uint8;
+    };`
+
+	device, err := parser.Parse(input)
+	require.NoError(t, err)
+
+	res, err := GenerateGo(device, "test")
+	require.NoError(t, err)
+	fmt.Println(res)
+
+	// Verify that the generated code contains the register reference
+	require.Contains(t, res, "config Config")
+	require.Contains(t, res, "offset += r.config.SendReadData(buf[offset:])")
+	require.Contains(t, res, "offset += r.config.ReceiveReadData(buf[offset:])")
+}
+
+func TestGenerateCppWithRegisterRefReadWrite(t *testing.T) {
+	input := `
+    device test
+    
+    register Config(1) {
+        mode uint8;
+    };
+    
+    register Main(2) {
+        read_config: r Config;
+        write_config: w Config;
+    };`
+
+	device, err := parser.Parse(input)
+	require.NoError(t, err)
+
+	res, err := GenerateCpp(device, "test", "test_h")
+	require.NoError(t, err)
+	fmt.Println(res)
+
+	// Verify that read_config uses send_read_data
+	require.Contains(t, res, "Config read_config;")
+	require.Contains(t, res, "read_config.send_read_data")
+
+	// Verify that write_config uses send_write_data
+	require.Contains(t, res, "Config write_config;")
+	require.Contains(t, res, "write_config.send_write_data")
+}

@@ -8,6 +8,8 @@ import (
 	"text/template"
 
 	"github.com/dspasibenko/pargus/pkg/parser"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 const goTemplate = `
@@ -92,11 +94,11 @@ func (r *{{.Name}}) ReceiveWriteData(buf []byte) int {
 
 {{- range .Fields}}
 // Getter and Setter for {{.Name}}
-func (r *{{$regName}}) Get_{{.Name}}() {{.Type}} {
+func (r *{{$regName}}) Get{{.CapitalizedName}}() {{.Type}} {
     return r.{{.Name}}
 }
 
-func (r *{{$regName}}) Set_{{.Name}}(v {{.Type}}) {
+func (r *{{$regName}}) Set{{.CapitalizedName}}(v {{.Type}}) {
     r.{{.Name}} = v
 }
 {{- end}}
@@ -160,6 +162,7 @@ type GoConstant struct {
 type GoField struct {
 	Doc                  []string
 	Name                 string
+	CapitalizedName      string
 	Decl                 string
 	Type                 string
 	BitMasks             []string
@@ -198,14 +201,33 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 
 		for _, f := range reg.Body.Fields() {
 			gf := GoField{
-				Doc:        flattenComments(f.Doc),
-				Name:       f.Name,
-				Trailing:   safeString(f.TrailingComment),
-				IsReadable: f.Specifier == "r" || f.Specifier == "",
-				IsWritable: f.Specifier == "w" || f.Specifier == "",
+				Doc:             flattenComments(f.Doc),
+				Name:            f.Name,
+				CapitalizedName: cases.Title(language.English).String(f.Name),
+				Trailing:        safeString(f.TrailingComment),
+				IsReadable:      f.Specifier == "r" || f.Specifier == "",
+				IsWritable:      f.Specifier == "w" || f.Specifier == "",
 			}
 
 			switch {
+			case f.Type.Simple != nil && f.Type.Simple.IsRegisterRef():
+				refRegName := f.Type.Simple.Name
+				gf.Type = refRegName
+				gf.Decl = fmt.Sprintf("%s %s", f.Name, refRegName)
+
+				// For RegisterRef, call different methods depending on read/write context
+				if gf.IsReadable {
+					gf.SendReadWriteData = append(gf.SendReadWriteData,
+						fmt.Sprintf("offset += r.%s.SendReadData(buf[offset:])", f.Name))
+					gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
+						fmt.Sprintf("offset += r.%s.ReceiveReadData(buf[offset:])", f.Name))
+				} else if gf.IsWritable {
+					gf.SendReadWriteData = append(gf.SendReadWriteData,
+						fmt.Sprintf("offset += r.%s.SendWriteData(buf[offset:])", f.Name))
+					gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
+						fmt.Sprintf("offset += r.%s.ReceiveWriteData(buf[offset:])", f.Name))
+				}
+
 			case f.Type.Bitfield != nil:
 				base := toGoTypes(f.Type.Bitfield.Base)
 				gf.Type = base
