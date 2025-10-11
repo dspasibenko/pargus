@@ -84,9 +84,12 @@ func TestGenerateCppWithBitfieldComments(t *testing.T) {
 	device, err := parser.Parse(input)
 	require.NoError(t, err)
 
-	res, err := GenerateCpp(device, "test", "test_h")
+	hpp, cpp, err := GenerateHppCpp(device, "test", "test_h", "test.h")
 	require.NoError(t, err)
-	fmt.Println(res)
+	fmt.Println("=== HPP ===")
+	fmt.Println(hpp)
+	fmt.Println("=== CPP ===")
+	fmt.Println(cpp)
 }
 
 func TestGenerateGoWithBitfieldComments(t *testing.T) {
@@ -130,14 +133,17 @@ func TestGenerateCppWithRegisterRef(t *testing.T) {
 	device, err := parser.Parse(input)
 	require.NoError(t, err)
 
-	res, err := GenerateCpp(device, "test", "test_h")
+	hpp, cpp, err := GenerateHppCpp(device, "test", "test_h", "test.h")
 	require.NoError(t, err)
-	fmt.Println(res)
+	fmt.Println("=== HPP ===")
+	fmt.Println(hpp)
+	fmt.Println("=== CPP ===")
+	fmt.Println(cpp)
 
 	// Verify that the generated code contains the register reference
-	require.Contains(t, res, "Config config;")
-	require.Contains(t, res, "offset += config.send_read_data(buf + offset, size - offset);")
-	require.Contains(t, res, "offset += config.receive_read_data(buf + offset, size - offset);")
+	require.Contains(t, hpp, "Config config;")
+	require.Contains(t, cpp, "{auto res = config.serialize_read(buf + offset, size - offset); if res < 0 return res; offset += res;}")
+	require.Contains(t, cpp, "{auto res = config.deserialize_read(buf + offset, size - offset); if res < 0 return res; offset += res;}")
 }
 
 func TestGenerateGoWithRegisterRef(t *testing.T) {
@@ -165,8 +171,10 @@ func TestGenerateGoWithRegisterRef(t *testing.T) {
 
 	// Verify that the generated code contains the register reference
 	require.Contains(t, res, "config Config")
-	require.Contains(t, res, "offset += r.config.SendReadData(buf[offset:])")
-	require.Contains(t, res, "offset += r.config.ReceiveReadData(buf[offset:])")
+	// In SerializeRead we serialize nested struct by calling DeserializeRead (reads from struct to buffer)
+	require.Contains(t, res, "offset += r.config.DeserializeRead(buf[offset:])")
+	// In DeserializeRead we deserialize nested struct by calling SerializeRead (reads from buffer to struct)
+	require.Contains(t, res, "offset += r.config.SerializeRead(buf[offset:])")
 }
 
 func TestGenerateCppWithRegisterRefReadWrite(t *testing.T) {
@@ -185,15 +193,18 @@ func TestGenerateCppWithRegisterRefReadWrite(t *testing.T) {
 	device, err := parser.Parse(input)
 	require.NoError(t, err)
 
-	res, err := GenerateCpp(device, "test", "test_h")
+	hpp, cpp, err := GenerateHppCpp(device, "test", "test_h", "test.h")
 	require.NoError(t, err)
-	fmt.Println(res)
+	fmt.Println("=== HPP ===")
+	fmt.Println(hpp)
+	fmt.Println("=== CPP ===")
+	fmt.Println(cpp)
 
-	// Verify that read_config uses send_read_data
-	require.Contains(t, res, "Config read_config;")
-	require.Contains(t, res, "read_config.send_read_data")
+	// Verify that read_config uses serialize_read
+	require.Contains(t, hpp, "Config read_config;")
+	require.Contains(t, cpp, "read_config.serialize_read")
 
-	// Verify that write_config uses send_write_data
-	require.Contains(t, res, "Config write_config;")
-	require.Contains(t, res, "write_config.send_write_data")
+	// Verify that write_config uses serialize_write
+	require.Contains(t, hpp, "Config write_config;")
+	require.Contains(t, cpp, "write_config.serialize_write")
 }

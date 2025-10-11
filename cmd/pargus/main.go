@@ -81,7 +81,7 @@ func main() {
 			base = base[:len(base)-len(ext)]
 		}
 		if *genType == "cpp" {
-			*output = base + ".h"
+			*output = base
 		} else {
 			*output = base + ".go"
 		}
@@ -102,12 +102,36 @@ func main() {
 	}
 
 	// Generate code
-	var code string
 	if *genType == "cpp" {
-		code, err = generator.GenerateCpp(device, *namespace, strings.ReplaceAll(*output, ".", "_"))
-	} else {
-		code, err = generator.GenerateGo(device, *pkg)
+		// Remove extension from output if it was specified
+		outputBase := *output
+		if ext := filepath.Ext(outputBase); ext == ".h" || ext == ".hpp" || ext == ".cpp" {
+			outputBase = outputBase[:len(outputBase)-len(ext)]
+		}
+
+		hppFileName := outputBase + ".h"
+		cppFileName := outputBase + ".cpp"
+		hpp, cpp, err := generator.GenerateHppCpp(device, *namespace, strings.ReplaceAll(hppFileName, ".", "_"), hppFileName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error generating code: %v\n", err)
+			os.Exit(1)
+		}
+		// Write output file
+		err = os.WriteFile(hppFileName, []byte(hpp), 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing output file %s: %v\n", hppFileName, err)
+			os.Exit(1)
+		}
+		fmt.Printf("Successfully generated %s\n", hppFileName)
+		err = os.WriteFile(cppFileName, []byte(cpp), 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing output file %s: %v\n", cppFileName, err)
+			os.Exit(1)
+		}
+		fmt.Printf("Successfully generated %s\n", cppFileName)
+		return
 	}
+	code, err := generator.GenerateGo(device, *pkg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating code: %v\n", err)
 		os.Exit(1)
