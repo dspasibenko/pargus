@@ -15,6 +15,8 @@ import (
 //
 
 const cppTemplate = `
+// This is auto-generated file. DO NOT EDIT. Use pargus compiler to regenerate it. 
+
 #ifndef __{{.Identifier}}__
 #define __{{.Identifier}}__
 
@@ -50,55 +52,65 @@ struct {{.Name}} {
     {{- end}}
     {{.Decl}}{{if .Trailing}} {{.Trailing}}{{end}}
 {{- end}}
-    
-    // Send read-only fields to wire (register read fields -> wire)
-    int send_read_data(uint8_t* buf, size_t size) {
-        int offset = 0;
-{{- range .Fields}}
-{{- if .IsReadable}}
-        {{range .SendReadWriteData}}{{.}}
-        {{end -}}
-{{- end}}
-{{- end}}
-        return offset;
-    }
 
-    // Send write-only fields to wire (register write fields -> wire)
-    int send_write_data(uint8_t* buf, size_t size) {
-        int offset = 0;
-{{- range .Fields}}
-{{- if .IsWritable}}
-        {{range .SendReadWriteData}}{{.}}
-        {{end -}}
-{{- end}}
-{{- end}}
-        return offset;
-    }
-    
-    // Get read-only fields from wire (wire -> the register read fields)
-    int receive_read_data(uint8_t* buf, size_t size) {
-        int offset = 0;
-{{- range .Fields}}
-{{- if .IsReadable}}
-        {{range .ReceiveReadWriteData}}{{.}}
-        {{end -}}
-{{- end}}
-{{- end}}
-        return offset;
-    }
-
-    // Get write-only fields from wire (wire -> the register writable fields)
-    int receive_write_data(uint8_t* buf, size_t size) {
-        int offset = 0;
-{{- range .Fields}}
-{{- if .IsWritable}}
-        {{range .ReceiveReadWriteData}}{{.}}
-        {{end -}}
-{{- end}}
-{{- end}}
-        return offset;
-    }
+	int serialize_read(uint8_t* buf, size_t size);
+	int serialize_write(uint8_t* buf, size_t size);
+	int deserialize_read(uint8_t* buf, size_t size);
+	int deserialize_write(uint8_t* buf, size_t size);
 };
+{{- end}}
+
+{{- range .Registers}}
+
+// ================= {{.Name}} implementation =================
+// Send read-only fields to wire (register read fields -> wire)
+int {{.Name}}::serialize_read(uint8_t* buf, size_t size) {
+	int offset = 0;
+{{- range .Fields}}
+{{- if .IsReadable}}
+	{{range .SendReadWriteData}}{{.}}
+	{{end -}}
+{{- end}}
+{{- end}}
+	return offset;
+}
+
+// Send write-only fields to wire (register write fields -> wire)
+int {{.Name}}::serialize_write(uint8_t* buf, size_t size) {
+	int offset = 0;
+{{- range .Fields}}
+{{- if .IsWritable}}
+	{{range .SendReadWriteData}}{{.}}
+	{{end -}}
+{{- end}}
+{{- end}}
+	return offset;
+}
+
+// Get read-only fields from wire (wire -> the register read fields)
+int {{.Name}}::deserialize_read(uint8_t* buf, size_t size) {
+	int offset = 0;
+{{- range .Fields}}
+{{- if .IsReadable}}
+	{{range .ReceiveReadWriteData}}{{.}}
+	{{end -}}
+{{- end}}
+{{- end}}
+	return offset;
+}
+
+// Get write-only fields from wire (wire -> the register writable fields)
+int {{.Name}}::deserialize_write(uint8_t* buf, size_t size) {
+	int offset = 0;
+{{- range .Fields}}
+{{- if .IsWritable}}
+	{{range .ReceiveReadWriteData}}{{.}}
+	{{end -}}
+{{- end}}
+{{- end}}
+	return offset;
+}
+
 {{- end}}
 } // namespace {{.Namespace}}
 #endif // __{{.Identifier}}__
@@ -193,14 +205,14 @@ func GenerateCpp(dev *parser.Device, namespace, identifier string) (string, erro
 				// For writable fields in send_write_data/receive_write_data
 				if cf.IsReadable {
 					cf.SendReadWriteData = append(cf.SendReadWriteData,
-						fmt.Sprintf("offset += %s.send_read_data(buf + offset, size - offset);", f.Name))
+						fmt.Sprintf("offset += %s.serialize_read(buf + offset, size - offset);", f.Name))
 					cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData,
-						fmt.Sprintf("offset += %s.receive_read_data(buf + offset, size - offset);", f.Name))
+						fmt.Sprintf("offset += %s.deserialize_read(buf + offset, size - offset);", f.Name))
 				} else if cf.IsWritable {
 					cf.SendReadWriteData = append(cf.SendReadWriteData,
-						fmt.Sprintf("offset += %s.send_write_data(buf + offset, size - offset);", f.Name))
+						fmt.Sprintf("offset += %s.serialize_write(buf + offset, size - offset);", f.Name))
 					cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData,
-						fmt.Sprintf("offset += %s.receive_write_data(buf + offset, size - offset);", f.Name))
+						fmt.Sprintf("offset += %s.deserialize_write(buf + offset, size - offset);", f.Name))
 				}
 
 			case f.Type.Bitfield != nil:
@@ -243,10 +255,10 @@ func GenerateCpp(dev *parser.Device, namespace, identifier string) (string, erro
 				if f.Type.Array.Size.Constant != nil {
 					sz := *f.Type.Array.Size.Constant
 					cf.Decl = fmt.Sprintf("%s %s[%s];", elem, f.Name, sz)
-					cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("if (offset + sizeof(%s)*%s <= size) {", elem, sz))
+					cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("if (offset + sizeof(%s) <= size) {", f.Name))
 					cf.SendReadWriteData = append(cf.SendReadWriteData, fmt.Sprintf("    offset += bigendian::encode(buf + offset, %s);", f.Name))
 					cf.SendReadWriteData = append(cf.SendReadWriteData, "}")
-					cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, fmt.Sprintf("if (offset + sizeof(%s)*%s <= size) {", elem, sz))
+					cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, fmt.Sprintf("if (offset + sizeof(%s) <= size) {", f.Name))
 					cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, fmt.Sprintf("    offset += bigendian::decode(%s, buf + offset);", f.Name))
 					cf.ReceiveReadWriteData = append(cf.ReceiveReadWriteData, "}")
 				} else {

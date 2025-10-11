@@ -13,6 +13,7 @@ import (
 )
 
 const goTemplate = `
+// This is auto-generated file. DO NOT EDIT. Use pargus compiler to regenerate it. 
 package {{.Package}}
 
 import (
@@ -23,10 +24,9 @@ import (
 {{.}}
 {{- end}}
 
-{{- range .Registers}}
+{{- range .Registers}}{{ $regName := .Name }}
 {{range .Doc}}{{.}}
 {{end -}}
-{{ $regName := .Name }}
 type {{.Name}} struct {
 {{- range .Fields}}
     {{- range .Doc}}
@@ -47,8 +47,14 @@ const {{.Name}} {{.Type}} = {{.Value}}
 {{.}}
 {{- end}}
 {{- end}}
+{{- end}}
 
-func (r *{{.Name}}) SendReadData(buf []byte) int {
+
+{{- range .Registers}}
+{{ $regName := .Name }}
+// ================= {{.Name}} implementation =================
+// SerializeRead serializes read data to the wire buffer
+func (r *{{.Name}}) SerializeRead(buf []byte) int {
     offset := 0
 {{- range .Fields}}
 {{- if .IsReadable}}
@@ -59,7 +65,8 @@ func (r *{{.Name}}) SendReadData(buf []byte) int {
     return offset
 }
 
-func (r *{{.Name}}) SendWriteData(buf []byte) int {
+// SerializeWrite serializes write data to the wire buffer
+func (r *{{.Name}}) SerializeWrite(buf []byte) int {
     offset := 0
 {{- range .Fields}}
 {{- if .IsWritable}}
@@ -70,7 +77,8 @@ func (r *{{.Name}}) SendWriteData(buf []byte) int {
     return offset
 }
 
-func (r *{{.Name}}) ReceiveReadData(buf []byte) int {
+// DeserializeRead deserializes read data into the register
+func (r *{{.Name}}) DeserializeRead(buf []byte) int {
     offset := 0
 {{- range .Fields}}
 {{- if .IsReadable}}
@@ -81,7 +89,8 @@ func (r *{{.Name}}) ReceiveReadData(buf []byte) int {
     return offset
 }
 
-func (r *{{.Name}}) ReceiveWriteData(buf []byte) int {
+// DeserializeWrite deserializes write data into the register
+func (r *{{.Name}}) DeserializeWrite(buf []byte) int {
     offset := 0
 {{- range .Fields}}
 {{- if .IsWritable}}
@@ -93,11 +102,12 @@ func (r *{{.Name}}) ReceiveWriteData(buf []byte) int {
 }
 
 {{- range .Fields}}
-// Getter and Setter for {{.Name}}
+// Get{{.CapitalizedName}} returns value for {{.Name}}
 func (r *{{$regName}}) Get{{.CapitalizedName}}() {{.Type}} {
     return r.{{.Name}}
 }
 
+// Set{{.CapitalizedName}} sets value for {{.Name}}
 func (r *{{$regName}}) Set{{.CapitalizedName}}(v {{.Type}}) {
     r.{{.Name}} = v
 }
@@ -218,14 +228,14 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 				// For RegisterRef, call different methods depending on read/write context
 				if gf.IsReadable {
 					gf.SendReadWriteData = append(gf.SendReadWriteData,
-						fmt.Sprintf("offset += r.%s.SendReadData(buf[offset:])", f.Name))
+						fmt.Sprintf("offset += r.%s.DeserializeRead(buf[offset:])", f.Name))
 					gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
-						fmt.Sprintf("offset += r.%s.ReceiveReadData(buf[offset:])", f.Name))
+						fmt.Sprintf("offset += r.%s.SerializeRead(buf[offset:])", f.Name))
 				} else if gf.IsWritable {
 					gf.SendReadWriteData = append(gf.SendReadWriteData,
-						fmt.Sprintf("offset += r.%s.SendWriteData(buf[offset:])", f.Name))
+						fmt.Sprintf("offset += r.%s.SerializeWrite(buf[offset:])", f.Name))
 					gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
-						fmt.Sprintf("offset += r.%s.ReceiveWriteData(buf[offset:])", f.Name))
+						fmt.Sprintf("offset += r.%s.DeserializeWrite(buf[offset:])", f.Name))
 				}
 
 			case f.Type.Bitfield != nil:
