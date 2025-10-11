@@ -34,6 +34,12 @@ type {{.Name}} struct {
 {{- end}}
 }
 
+{{- range .Constants}}
+{{range .Doc}}{{.}}
+{{end -}}
+const {{.Name}} {{.Type}} = {{.Value}}
+{{- end}}
+
 {{- range .Fields}}
 {{- range .BitMasks}}
 {{.}}
@@ -138,9 +144,17 @@ type GoDevice struct {
 }
 
 type GoRegister struct {
-	Name   string
-	Doc    []string
-	Fields []GoField
+	Name      string
+	Doc       []string
+	Constants []GoConstant
+	Fields    []GoField
+}
+
+type GoConstant struct {
+	Doc   []string
+	Name  string
+	Type  string
+	Value string
 }
 
 type GoField struct {
@@ -171,7 +185,18 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 			Doc:  flattenComments(reg.Doc),
 		}
 
-		for _, f := range reg.Fields {
+		// Process constants
+		for _, c := range reg.Body.Constants() {
+			gc := GoConstant{
+				Doc:   flattenComments(c.Doc),
+				Name:  fmt.Sprintf("%s_%s", reg.Name, c.Name),
+				Type:  toGoTypes(c.Type.Name),
+				Value: c.ValueStr,
+			}
+			gr.Constants = append(gr.Constants, gc)
+		}
+
+		for _, f := range reg.Body.Fields() {
 			gf := GoField{
 				Doc:        flattenComments(f.Doc),
 				Name:       f.Name,

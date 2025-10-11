@@ -37,7 +37,24 @@ type Register struct {
 	Name      string        `"register" @Ident`
 	NumberStr string        `"(" @Int ")"`
 	Specifier string        `( ":" @("r"|"w") )?`
-	Fields    []*Field      `"{" ( @@ )* "}" ";"`
+	Body      *RegisterBody `@@`
+}
+
+type RegisterBody struct {
+	Items []*BodyItem `"{" ( @@ )* "}" ";"`
+}
+
+type BodyItem struct {
+	Constant *Constant `@@`
+	Field    *Field    `| @@`
+}
+
+type Constant struct {
+	Pos      lexer.Position
+	Doc      *CommentGroup `@@?`
+	Name     string        `"const" @Ident "="`
+	Type     SimpleType    `@@`
+	ValueStr string        `"(" @Int ")" ";"`
 }
 
 type Field struct {
@@ -107,12 +124,15 @@ var parser = participle.MustBuild[Device](
 		{"End", `;([ \t]+//[^\r\n]*)?`},
 		{"Comment", `//[^\r\n]*`},
 		{"EmptyLine", `\n\s*\n`},
+		{"Keyword", `\b(const|device|register)\b`},
 		{"Ident", `[a-zA-Z_][a-zA-Z0-9_-]*`},
 		{"Int", `0[xX][0-9a-fA-F]+|0[bB][01]+|\d+`},
-		{"Punct", `[{}();:,\[\]-]`},
+		{"Punct", `[{}();:,\[\]=\-]`},
 		{"Whitespace", `\s+`},
 	})),
 	participle.Elide("Whitespace"),
+	participle.Union[Type](&SimpleType{}, &ArrayType{}, &BitField{}),
+	participle.UseLookahead(4),
 )
 
 func Parse(input string) (*Device, error) {
@@ -126,7 +146,7 @@ func Parse(input string) (*Device, error) {
 
 	// Process trailing comments - extract comment part from TrailingComment tokens
 	for _, register := range device.Registers {
-		for _, field := range register.Fields {
+		for _, field := range register.Body.Fields() {
 			if field.TrailingComment == nil {
 				continue
 			}
@@ -193,6 +213,26 @@ func trimString(input string) string {
 	return strings.Join(lines[:lastNonEmpty+1], "\n")
 }
 
+func (rb *RegisterBody) Constants() []*Constant {
+	var constants []*Constant
+	for _, item := range rb.Items {
+		if item.Constant != nil {
+			constants = append(constants, item.Constant)
+		}
+	}
+	return constants
+}
+
+func (rb *RegisterBody) Fields() []*Field {
+	var fields []*Field
+	for _, item := range rb.Items {
+		if item.Field != nil {
+			fields = append(fields, item.Field)
+		}
+	}
+	return fields
+}
+
 func (r *Register) Number() int64 {
 	val, err := strconv.ParseInt(r.NumberStr, 0, 64)
 	if err != nil {
@@ -209,7 +249,7 @@ func (r *Register) validateAndUpdateFieldSpecifiers() error {
 		return nil
 	}
 
-	for _, field := range r.Fields {
+	for _, field := range r.Body.Fields() {
 		fieldSpec := field.Specifier
 
 		// If field has no specifier, it inherits register specifier (valid)
@@ -234,7 +274,7 @@ func (r *Register) validateAndUpdateFieldSpecifiers() error {
 // validateBitFields validates that bit fields use only unsigned integer types
 // and that bit ranges don't exceed the size of the base type
 func (r *Register) validateBitFields() error {
-	for _, field := range r.Fields {
+	for _, field := range r.Body.Fields() {
 		if field.Type.Bitfield != nil {
 			bitField := field.Type.Bitfield
 
@@ -294,6 +334,14 @@ func (bm *BitMember) StartBit() int {
 	return int(val)
 }
 
+func (c *Constant) Value() int64 {
+	val, err := strconv.ParseInt(c.ValueStr, 0, 64)
+	if err != nil {
+		panic(fmt.Sprintf("invalid constant value %s", c.ValueStr))
+	}
+	return val
+}
+
 // isUnsignedType checks if a type is an unsigned integer type
 func isUnsignedType(typeName string) bool {
 	switch typeName {
@@ -323,8 +371,9 @@ func getTypeSizeInBits(typeName string) int {
 // FindFieldByName finds a field by name in the register, checking both regular fields and bitfield members
 func (r *Register) FindFieldByName(fieldName string, currentFieldIndex int) (*Field, *BitMember) {
 	// Check regular fields declared before current field
+	fields := r.Body.Fields()
 	for i := 0; i < currentFieldIndex; i++ {
-		field := r.Fields[i]
+		field := fields[i]
 
 		// Check if it's a regular field with matching name
 		if field.Name == fieldName && field.Type.Simple != nil {
@@ -349,7 +398,8 @@ func (r *Register) FindFieldByName(fieldName string, currentFieldIndex int) (*Fi
 // validateArrays validates that variable-length arrays use unsigned integer types for size
 // and that referenced fields are declared before the array
 func (r *Register) validateArrays() error {
-	for i, field := range r.Fields {
+	fields := r.Body.Fields()
+	for i, field := range fields {
 		if field.Type.Array == nil {
 			continue
 		}

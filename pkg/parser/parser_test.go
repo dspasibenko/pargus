@@ -65,10 +65,10 @@ register WriteOnly(3):w {
 	controlRegister := device.Registers[0]
 	assert.Equal(t, "Control", controlRegister.Name, "Control register name should match")
 	assert.Equal(t, int64(1), controlRegister.Number(), "Control register number should match")
-	assert.Len(t, controlRegister.Fields, 6, "Control register should have 6 fields")
+	assert.Len(t, controlRegister.Body.Fields(), 6, "Control register should have 6 fields")
 
 	// Test enable field
-	enableField := controlRegister.Fields[0]
+	enableField := controlRegister.Body.Fields()[0]
 	assert.Equal(t, "enable", enableField.Name, "Enable field name should match")
 	require.NotNil(t, enableField.Doc, "Enable field should have leading comments")
 	assert.Len(t, enableField.Doc.Elements, 1, "Enable field should have 1 leading comment")
@@ -106,7 +106,7 @@ register WriteOnly(3):w {
 	assert.True(t, highMember.Doc == nil || len(highMember.Doc.Elements) == 0, "high should not have comments")
 
 	// Test temperature field
-	temperatureField := controlRegister.Fields[1]
+	temperatureField := controlRegister.Body.Fields()[1]
 	assert.Equal(t, "temperature", temperatureField.Name, "Temperature field name should match")
 	require.NotNil(t, temperatureField.Doc, "Temperature field should have leading comments")
 	assert.Len(t, temperatureField.Doc.Elements, 1, "Temperature field should have 1 leading comment")
@@ -116,7 +116,7 @@ register WriteOnly(3):w {
 	assert.Equal(t, "", *temperatureField.TrailingComment, "Temperature field trailing comment should be empty")
 
 	// Test write_only_temp field
-	writeOnlyTempField := controlRegister.Fields[2]
+	writeOnlyTempField := controlRegister.Body.Fields()[2]
 	assert.Equal(t, "write_only_temp", writeOnlyTempField.Name, "WriteOnlyTemp field name should match")
 	require.NotNil(t, writeOnlyTempField.Doc, "WriteOnlyTemp field should have leading comments")
 	assert.Len(t, writeOnlyTempField.Doc.Elements, 3, "WriteOnlyTemp field should have 3 leading comments")
@@ -129,7 +129,7 @@ register WriteOnly(3):w {
 	assert.Equal(t, "", *writeOnlyTempField.TrailingComment, "WriteOnlyTemp field trailing comment should be empty")
 
 	// Test data field
-	dataField := controlRegister.Fields[3]
+	dataField := controlRegister.Body.Fields()[3]
 	assert.Equal(t, "data", dataField.Name, "Data field name should match")
 	require.NotNil(t, dataField.Doc, "Data field should have leading comments")
 	assert.Len(t, dataField.Doc.Elements, 2, "Data field should have 2 leading comments")
@@ -140,7 +140,7 @@ register WriteOnly(3):w {
 	assert.Equal(t, "", *dataField.TrailingComment, "Data field trailing comment should be empty")
 
 	// Test data_buffer field
-	dataBufferField := controlRegister.Fields[4]
+	dataBufferField := controlRegister.Body.Fields()[4]
 	assert.Equal(t, "data_buffer", dataBufferField.Name, "DataBuffer field name should match")
 	require.NotNil(t, dataBufferField.Doc, "DataBuffer field should have leading comments")
 	assert.Len(t, dataBufferField.Doc.Elements, 3, "DataBuffer field should have 3 leading comments")
@@ -153,7 +153,7 @@ register WriteOnly(3):w {
 	assert.Equal(t, "", *dataBufferField.TrailingComment, "DataBuffer field trailing comment should be empty")
 
 	// Test flow field
-	flowField := controlRegister.Fields[5]
+	flowField := controlRegister.Body.Fields()[5]
 	assert.Equal(t, "flow", flowField.Name, "Flow field name should match")
 	require.NotNil(t, flowField.Doc, "Flow field should have leading comments")
 	assert.Len(t, flowField.Doc.Elements, 2, "Flow field should have 2 leading comments")
@@ -169,10 +169,10 @@ register WriteOnly(3):w {
 	assert.Equal(t, int64(2), checkRegister.Number(), "Check register number should match")
 	require.NotNil(t, checkRegister.Specifier, "Check register should have specifier")
 	assert.Equal(t, "r", checkRegister.Specifier, "Check register should be read-only")
-	assert.Len(t, checkRegister.Fields, 1, "Check register should have 1 field")
+	assert.Len(t, checkRegister.Body.Fields(), 1, "Check register should have 1 field")
 
 	// Test Check field
-	checkField := checkRegister.Fields[0]
+	checkField := checkRegister.Body.Fields()[0]
 	assert.Equal(t, "field", checkField.Name, "Check field name should match")
 	assert.True(t, checkField.Doc == nil || len(checkField.Doc.Elements) == 0, "Check field should not have leading comments")
 	require.NotNil(t, checkField.TrailingComment, "Check field should have trailing comment")
@@ -184,10 +184,10 @@ register WriteOnly(3):w {
 	assert.Equal(t, int64(3), writeOnlyRegister.Number(), "WriteOnly register number should match")
 	require.NotNil(t, writeOnlyRegister.Specifier, "WriteOnly register should have specifier")
 	assert.Equal(t, "w", writeOnlyRegister.Specifier, "WriteOnly register should be write-only")
-	assert.Len(t, writeOnlyRegister.Fields, 1, "WriteOnly register should have 1 field")
+	assert.Len(t, writeOnlyRegister.Body.Fields(), 1, "WriteOnly register should have 1 field")
 
 	// Test WriteOnly field
-	writeOnlyField := writeOnlyRegister.Fields[0]
+	writeOnlyField := writeOnlyRegister.Body.Fields()[0]
 	assert.Equal(t, "write_only_field", writeOnlyField.Name, "WriteOnly field name should match")
 	require.NotNil(t, writeOnlyField.Doc, "WriteOnly field should have leading comments")
 	assert.Len(t, writeOnlyField.Doc.Elements, 1, "WriteOnly field should have 1 leading comment")

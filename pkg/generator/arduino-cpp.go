@@ -35,6 +35,12 @@ static constexpr uint8_t Reg_{{.Name}}_ID = {{.Number}};
 {{range .Doc}}{{.}}
 {{end -}}
 struct {{.Name}} {
+{{- range .Constants}}
+    {{- range .Doc}}
+    {{.}}
+    {{- end}}
+    static constexpr {{.Type}} {{.Name}} = {{.Value}};
+{{- end}}
 {{- range .Fields}}
 	{{- range .BitMasks}}
     {{.}}
@@ -110,10 +116,18 @@ type CppDevice struct {
 }
 
 type CppRegister struct {
-	Name   string
-	Number int
-	Doc    []string
-	Fields []CppField
+	Name      string
+	Number    int
+	Doc       []string
+	Constants []CppConstant
+	Fields    []CppField
+}
+
+type CppConstant struct {
+	Doc   []string
+	Name  string
+	Type  string
+	Value string
 }
 
 type CppField struct {
@@ -148,7 +162,18 @@ func GenerateCpp(dev *parser.Device, namespace, identifier string) (string, erro
 			Doc:    flattenComments(reg.Doc),
 		}
 
-		for _, f := range reg.Fields {
+		// Process constants
+		for _, c := range reg.Body.Constants() {
+			cc := CppConstant{
+				Doc:   flattenComments(c.Doc),
+				Name:  c.Name,
+				Type:  toCppTypes(c.Type.Name),
+				Value: c.ValueStr,
+			}
+			cr.Constants = append(cr.Constants, cc)
+		}
+
+		for _, f := range reg.Body.Fields() {
 			cf := CppField{
 				Doc:        flattenComments(f.Doc),
 				Name:       f.Name,
