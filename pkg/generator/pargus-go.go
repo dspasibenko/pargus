@@ -53,12 +53,43 @@ const {{.Name}} {{.Type}} = {{.Value}}
 {{- range .Registers}}
 {{ $regName := .Name }}
 // ================= {{.Name}} implementation =================
+// The {{.Name}} register's ID
+func (r *{{.Name}}) ID() uint8 {
+	return {{.ID}}
+}
+
+// BufSize4Read returns the buffer size required for read fields serialization
+func (r *{{.Name}}) BufSize4Read() int {
+    size := {{.BufSize4ReadConst}}
+{{- range .Fields}}
+{{- if .IsReadable}}
+{{- if .BufSize4ReadExpr}}
+    size += {{.BufSize4ReadExpr}}
+{{- end}}
+{{- end}}
+{{- end}}
+    return size
+}
+
+// BufSize4Write returns the buffer size required for write fields serialization
+func (r *{{.Name}}) BufSize4Write() int {
+    size := {{.BufSize4WriteConst}}
+{{- range .Fields}}
+{{- if .IsWritable}}
+{{- if .BufSize4WriteExpr}}
+    size += {{.BufSize4WriteExpr}}
+{{- end}}
+{{- end}}
+{{- end}}
+    return size
+}
+
 // SerializeRead serializes read data to the wire buffer
 func (r *{{.Name}}) SerializeRead(buf []byte) int {
     offset := 0
 {{- range .Fields}}
 {{- if .IsReadable}}
-    {{range .SendReadWriteData}}{{.}}
+    {{range .SerializeData}}{{.}}
     {{end -}}
 {{- end}}
 {{- end}}
@@ -70,7 +101,7 @@ func (r *{{.Name}}) SerializeWrite(buf []byte) int {
     offset := 0
 {{- range .Fields}}
 {{- if .IsWritable}}
-    {{range .SendReadWriteData}}{{.}}
+    {{range .SerializeData}}{{.}}
     {{end -}}
 {{- end}}
 {{- end}}
@@ -82,7 +113,7 @@ func (r *{{.Name}}) DeserializeRead(buf []byte) int {
     offset := 0
 {{- range .Fields}}
 {{- if .IsReadable}}
-    {{range .ReceiveReadWriteData}}{{.}}
+    {{range .DeserializeData}}{{.}}
     {{end -}}
 {{- end}}
 {{- end}}
@@ -94,7 +125,7 @@ func (r *{{.Name}}) DeserializeWrite(buf []byte) int {
     offset := 0
 {{- range .Fields}}
 {{- if .IsWritable}}
-    {{range .ReceiveReadWriteData}}{{.}}
+    {{range .DeserializeData}}{{.}}
     {{end -}}
 {{- end}}
 {{- end}}
@@ -156,10 +187,13 @@ type GoDevice struct {
 }
 
 type GoRegister struct {
-	Name      string
-	Doc       []string
-	Constants []GoConstant
-	Fields    []GoField
+	Name               string
+	ID                 uint8
+	Doc                []string
+	Constants          []GoConstant
+	Fields             []GoField
+	BufSize4ReadConst  int
+	BufSize4WriteConst int
 }
 
 type GoConstant struct {
@@ -170,17 +204,19 @@ type GoConstant struct {
 }
 
 type GoField struct {
-	Doc                  []string
-	Name                 string
-	CapitalizedName      string
-	Decl                 string
-	Type                 string
-	BitMasks             []string
-	IsReadable           bool
-	IsWritable           bool
-	SendReadWriteData    []string
-	ReceiveReadWriteData []string
-	Trailing             string
+	Doc               []string
+	Name              string
+	CapitalizedName   string
+	Decl              string
+	Type              string
+	BitMasks          []string
+	IsReadable        bool
+	IsWritable        bool
+	SerializeData     []string
+	DeserializeData   []string
+	Trailing          string
+	BufSize4ReadExpr  string // Expression for variable size (empty if constant)
+	BufSize4WriteExpr string // Expression for variable size (empty if constant)
 }
 
 func GenerateGo(dev *parser.Device, pkg string) (string, error) {
@@ -195,6 +231,7 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 	for _, reg := range dev.Registers {
 		gr := GoRegister{
 			Name: reg.Name,
+			ID:   uint8(reg.Number()),
 			Doc:  flattenComments(reg.Doc),
 		}
 
@@ -227,15 +264,18 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 
 				// For RegisterRef, call different methods depending on read/write context
 				if gf.IsReadable {
-					gf.SendReadWriteData = append(gf.SendReadWriteData,
-						fmt.Sprintf("offset += r.%s.DeserializeRead(buf[offset:])", f.Name))
-					gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
+					gf.SerializeData = append(gf.SerializeData,
 						fmt.Sprintf("offset += r.%s.SerializeRead(buf[offset:])", f.Name))
-				} else if gf.IsWritable {
-					gf.SendReadWriteData = append(gf.SendReadWriteData,
+					gf.DeserializeData = append(gf.DeserializeData,
+						fmt.Sprintf("offset += r.%s.DeserializeRead(buf[offset:])", f.Name))
+					gf.BufSize4ReadExpr = fmt.Sprintf("r.%s.BufSize4Read()", f.Name)
+				}
+				if gf.IsWritable {
+					gf.SerializeData = append(gf.SerializeData,
 						fmt.Sprintf("offset += r.%s.SerializeWrite(buf[offset:])", f.Name))
-					gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
+					gf.DeserializeData = append(gf.DeserializeData,
 						fmt.Sprintf("offset += r.%s.DeserializeWrite(buf[offset:])", f.Name))
+					gf.BufSize4WriteExpr = fmt.Sprintf("r.%s.BufSize4Write()", f.Name)
 				}
 
 			case f.Type.Bitfield != nil:
@@ -268,12 +308,20 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 							f.Name, bm.Name, base, mask))
 				}
 				size := typeSize(base)
-				gf.SendReadWriteData = append(gf.SendReadWriteData,
+				gf.SerializeData = append(gf.SerializeData,
 					fmt.Sprintf("putUint%d(buf[offset:], uint%d(r.%s))", size*8, size*8, f.Name),
 					fmt.Sprintf("offset += %d", size))
-				gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
+				gf.DeserializeData = append(gf.DeserializeData,
 					fmt.Sprintf("r.%s = %s(getUint%d(buf[offset:]))", f.Name, base, size*8),
 					fmt.Sprintf("offset += %d", size))
+
+				// Bitfield buffer size is constant - add directly to register
+				if gf.IsReadable {
+					gr.BufSize4ReadConst += size
+				}
+				if gf.IsWritable {
+					gr.BufSize4WriteConst += size
+				}
 
 			case f.Type.Array != nil && f.Type.Array.Size.Constant != nil:
 				elem := toGoTypes(f.Type.Array.Type.Name)
@@ -281,16 +329,26 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 				gf.Type = fmt.Sprintf("[%s]%s", sz, elem)
 				gf.Decl = fmt.Sprintf("%s %s", f.Name, gf.Type)
 				elemSize := typeSize(elem)
-				gf.SendReadWriteData = append(gf.SendReadWriteData,
+				gf.SerializeData = append(gf.SerializeData,
 					fmt.Sprintf("for i := 0; i < %s; i++ {", sz),
 					fmt.Sprintf("    putUint%d(buf[offset:], uint%d(r.%s[i]))", elemSize*8, elemSize*8, f.Name),
 					fmt.Sprintf("    offset += %d", elemSize),
 					"}")
-				gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
+				gf.DeserializeData = append(gf.DeserializeData,
 					fmt.Sprintf("for i := 0; i < %s; i++ {", sz),
 					fmt.Sprintf("    r.%s[i] = %s(getUint%d(buf[offset:]))", f.Name, elem, elemSize*8),
 					fmt.Sprintf("    offset += %d", elemSize),
 					"}")
+
+				// Constant array buffer size: array size * element size - add directly to register
+				szInt, _ := strconv.Atoi(sz)
+				bufSizeConst := szInt * elemSize
+				if gf.IsReadable {
+					gr.BufSize4ReadConst += bufSizeConst
+				}
+				if gf.IsWritable {
+					gr.BufSize4WriteConst += bufSizeConst
+				}
 
 			case f.Type.Array != nil && f.Type.Array.Size.Variable != nil:
 				elem := toGoTypes(f.Type.Array.Type.Name)
@@ -300,48 +358,70 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 				elemSize := typeSize(elem)
 
 				fld, bm := reg.FindFieldByName(refField, len(gr.Fields))
-				gf.SendReadWriteData = []string{"{"}
-				gf.ReceiveReadWriteData = []string{"{"}
+				gf.SerializeData = []string{"{"}
+				gf.DeserializeData = []string{"{"}
+
+				var bufSizeExpr string
 				if bm != nil {
-					gf.SendReadWriteData = append(gf.SendReadWriteData,
+					gf.SerializeData = append(gf.SerializeData,
 						fmt.Sprintf("    elems := (r.%s&%s_%s_%s_bm)>>%d", refField, reg.Name, fld.Name, bm.Name, bm.StartBit()),
 					)
-					gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
+					gf.DeserializeData = append(gf.DeserializeData,
 						fmt.Sprintf("    elems := (r.%s&%s_%s_%s_bm)>>%d", refField, reg.Name, fld.Name, bm.Name, bm.StartBit()),
 					)
+					// Variable array buffer size: element size * bitfield value
+					bufSizeExpr = fmt.Sprintf("(int((r.%s&%s_%s_%s_bm)>>%d) * %d)",
+						refField, reg.Name, fld.Name, bm.Name, bm.StartBit(), elemSize)
 				} else {
-					gf.SendReadWriteData = append(gf.SendReadWriteData,
+					gf.SerializeData = append(gf.SerializeData,
 						fmt.Sprintf("    elems := r.%s", refField),
 					)
-					gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
+					gf.DeserializeData = append(gf.DeserializeData,
 						fmt.Sprintf("    elems := r.%s", refField),
 					)
+					// Variable array buffer size: element size * reference field
+					bufSizeExpr = fmt.Sprintf("(int(r.%s) * %d)", refField, elemSize)
 				}
-				gf.SendReadWriteData = append(gf.SendReadWriteData,
+				gf.SerializeData = append(gf.SerializeData,
 					"    for i := 0; i < int(elems); i++ {",
 					fmt.Sprintf("        putUint%d(buf[offset:], uint%d(r.%s[i]))", elemSize*8, elemSize*8, f.Name),
 					fmt.Sprintf("        offset += %d", elemSize),
 					"    }")
-				gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
+				gf.DeserializeData = append(gf.DeserializeData,
 					fmt.Sprintf("	r.%s = []%s{}", f.Name, elem),
 					"    for i := 0; i < int(elems); i++ {",
 					fmt.Sprintf("        r.%s = append(r.%s, %s(getUint%d(buf[offset:])))", f.Name, f.Name, elem, elemSize*8),
 					fmt.Sprintf("        offset += %d", elemSize),
 					"    }")
-				gf.SendReadWriteData = append(gf.SendReadWriteData, "}")
-				gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData, "}")
+				gf.SerializeData = append(gf.SerializeData, "}")
+				gf.DeserializeData = append(gf.DeserializeData, "}")
+
+				if gf.IsReadable {
+					gf.BufSize4ReadExpr = bufSizeExpr
+				}
+				if gf.IsWritable {
+					gf.BufSize4WriteExpr = bufSizeExpr
+				}
 
 			case f.Type.Simple != nil:
 				elem := toGoTypes(f.Type.Simple.Name)
 				gf.Type = elem
 				gf.Decl = fmt.Sprintf("%s %s", f.Name, elem)
 				size := typeSize(elem)
-				gf.SendReadWriteData = append(gf.SendReadWriteData,
+				gf.SerializeData = append(gf.SerializeData,
 					fmt.Sprintf("putUint%d(buf[offset:], uint%d(r.%s))", size*8, size*8, f.Name),
 					fmt.Sprintf("offset += %d", size))
-				gf.ReceiveReadWriteData = append(gf.ReceiveReadWriteData,
+				gf.DeserializeData = append(gf.DeserializeData,
 					fmt.Sprintf("r.%s = %s(getUint%d(buf[offset:]))", f.Name, elem, size*8),
 					fmt.Sprintf("offset += %d", size))
+
+				// Simple type buffer size is constant - add directly to register
+				if gf.IsReadable {
+					gr.BufSize4ReadConst += size
+				}
+				if gf.IsWritable {
+					gr.BufSize4WriteConst += size
+				}
 
 			default:
 				gf.Type = "interface{}"
@@ -350,6 +430,7 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 
 			gr.Fields = append(gr.Fields, gf)
 		}
+
 		out.Registers = append(out.Registers, gr)
 	}
 
