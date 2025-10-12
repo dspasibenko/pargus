@@ -18,6 +18,7 @@ package {{.Package}}
 
 import (
     "encoding/binary"
+    "fmt"
 )
 
 {{- range .Doc}}
@@ -84,8 +85,21 @@ func (r *{{.Name}}) BufSize4Write() int {
     return size
 }
 
+// Check validates the consistency of variable-length arrays with their size fields
+func (r *{{.Name}}) Check() error {
+{{- range .Fields}}
+{{- range .ConsistencyChecks}}
+    {{.}}
+{{- end}}
+{{- end}}
+    return nil
+}
+
 // SerializeRead serializes read data to the wire buffer
-func (r *{{.Name}}) SerializeRead(buf []byte) int {
+func (r *{{.Name}}) SerializeRead(buf []byte) (int, error) {
+    if err := r.Check(); err != nil {
+        return 0, err
+    }
     offset := 0
 {{- range .Fields}}
 {{- if .IsReadable}}
@@ -93,11 +107,14 @@ func (r *{{.Name}}) SerializeRead(buf []byte) int {
     {{end -}}
 {{- end}}
 {{- end}}
-    return offset
+    return offset, nil
 }
 
 // SerializeWrite serializes write data to the wire buffer
-func (r *{{.Name}}) SerializeWrite(buf []byte) int {
+func (r *{{.Name}}) SerializeWrite(buf []byte) (int, error) {
+    if err := r.Check(); err != nil {
+        return 0, err
+    }
     offset := 0
 {{- range .Fields}}
 {{- if .IsWritable}}
@@ -105,11 +122,11 @@ func (r *{{.Name}}) SerializeWrite(buf []byte) int {
     {{end -}}
 {{- end}}
 {{- end}}
-    return offset
+    return offset, nil
 }
 
 // DeserializeRead deserializes read data into the register
-func (r *{{.Name}}) DeserializeRead(buf []byte) int {
+func (r *{{.Name}}) DeserializeRead(buf []byte) (int, error) {
     offset := 0
 {{- range .Fields}}
 {{- if .IsReadable}}
@@ -117,11 +134,11 @@ func (r *{{.Name}}) DeserializeRead(buf []byte) int {
     {{end -}}
 {{- end}}
 {{- end}}
-    return offset
+    return offset, nil
 }
 
 // DeserializeWrite deserializes write data into the register
-func (r *{{.Name}}) DeserializeWrite(buf []byte) int {
+func (r *{{.Name}}) DeserializeWrite(buf []byte) (int, error) {
     offset := 0
 {{- range .Fields}}
 {{- if .IsWritable}}
@@ -129,7 +146,7 @@ func (r *{{.Name}}) DeserializeWrite(buf []byte) int {
     {{end -}}
 {{- end}}
 {{- end}}
-    return offset
+    return offset, nil
 }
 
 {{- range .Fields}}
@@ -146,37 +163,124 @@ func (r *{{$regName}}) Set{{.CapitalizedName}}(v {{.Type}}) {
 
 {{- end}}
 
-func putUint8(b []byte, v uint8) {
-	_ = b[0]
-	b[0] = v
+type Integer interface {
+	~int8 | ~int16 | ~int32 | ~int64 | ~uint8 | ~uint16 | ~uint32 | ~uint64
 }
 
-func putUint16(b []byte, v uint16) {
-	binary.BigEndian.PutUint16(b, v)
+func putNumber[T Integer](b []byte, v T) error {
+	size := binary.Size(v)
+	if len(b) < size {
+		return fmt.Errorf("buffer too small: need %d bytes, have %d", size, len(b))
+	}
+	
+	switch size {
+	case 1:
+		b[0] = byte(v)
+	case 2:
+		binary.BigEndian.PutUint16(b, uint16(v))
+	case 4:
+		binary.BigEndian.PutUint32(b, uint32(v))
+	case 8:
+		binary.BigEndian.PutUint64(b, uint64(v))
+	default:
+		return fmt.Errorf("unsupported type size: %d", size)
+	}
+	return nil
 }
 
-func putUint32(b []byte, v uint32) {
-	binary.BigEndian.PutUint32(b, v)
+func getNumber[T Integer](b []byte, res *T) error {
+	size := binary.Size(*res)
+	if len(b) < size {
+		return fmt.Errorf("buffer too small: need %d bytes, have %d", size, len(b))
+	}
+	
+	switch size {
+	case 1:
+		*res = T(b[0])
+	case 2:
+		*res = T(binary.BigEndian.Uint16(b))
+	case 4:
+		*res = T(binary.BigEndian.Uint32(b))
+	case 8:
+		*res = T(binary.BigEndian.Uint64(b))
+	default:
+		return fmt.Errorf("unsupported type size: %d", size)
+	}
+	return nil
 }
 
-func putUint64(b []byte, v uint64) {
-	binary.BigEndian.PutUint64(b, v)
+func putSlice[T Integer](b []byte, s []T) error {
+	if len(s) == 0 {
+		return nil
+	}
+	
+	size := binary.Size(s[0])
+	totalSize := size * len(s)
+	if len(b) < totalSize {
+		return fmt.Errorf("buffer too small: need %d bytes, have %d", totalSize, len(b))
+	}
+	
+	switch size {
+	case 1:
+		for i, val := range s {
+			b[i] = byte(val)
+		}
+	case 2:
+		for _, val := range s {
+			binary.BigEndian.PutUint16(b, uint16(val))
+			b = b[2:]
+		}
+	case 4:
+		for _, val := range s {
+			binary.BigEndian.PutUint32(b, uint32(val))
+			b = b[4:]
+		}
+	case 8:
+		for _, val := range s {
+			binary.BigEndian.PutUint64(b, uint64(val))
+			b = b[8:]
+		}
+	default:
+		return fmt.Errorf("unsupported type size: %d", size)
+	}
+	return nil
 }
 
-func getUint8(b []byte) uint8 {
-	return b[0]
-}
-
-func getUint16(b []byte) uint16 {
-	return binary.BigEndian.Uint16(b)
-}
-
-func getUint32(b []byte) uint32 {
-	return binary.BigEndian.Uint32(b)
-}
-
-func getUint64(b []byte) uint64 {
-	return binary.BigEndian.Uint64(b)
+func getSlice[T Integer](b []byte, s []T) error {
+	if len(s) == 0 {
+		return nil
+	}
+	
+	size := binary.Size(s[0])
+	totalSize := size * len(s)
+	if len(b) < totalSize {
+		return fmt.Errorf("buffer too small: need %d bytes, have %d", totalSize, len(b))
+	}
+	
+	switch size {
+	case 1:
+		for i := range s {
+			s[i] = T(b[i])
+		}
+	case 2:
+		for i := range s {
+			s[i] = T(binary.BigEndian.Uint16(b))
+			b = b[2:]
+		}
+	case 4:
+		for i := range s {
+			s[i] = T(binary.BigEndian.Uint32(b))
+			b = b[4:]
+		}
+	case 8:
+		for i := range s {
+			s[i] = T(binary.BigEndian.Uint64(b))
+			b = b[8:]
+		}
+	default:
+		return fmt.Errorf("unsupported type size: %d", size)
+	}
+	return nil
 }
 `
 
@@ -215,8 +319,9 @@ type GoField struct {
 	SerializeData     []string
 	DeserializeData   []string
 	Trailing          string
-	BufSize4ReadExpr  string // Expression for variable size (empty if constant)
-	BufSize4WriteExpr string // Expression for variable size (empty if constant)
+	BufSize4ReadExpr  string   // Expression for variable size (empty if constant)
+	BufSize4WriteExpr string   // Expression for variable size (empty if constant)
+	ConsistencyChecks []string // Checks for variable-length arrays
 }
 
 func GenerateGo(dev *parser.Device, pkg string) (string, error) {
@@ -265,16 +370,32 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 				// For RegisterRef, call different methods depending on read/write context
 				if gf.IsReadable {
 					gf.SerializeData = append(gf.SerializeData,
-						fmt.Sprintf("offset += r.%s.SerializeRead(buf[offset:])", f.Name))
+						fmt.Sprintf("if n, err := r.%s.SerializeRead(buf[offset:]); err != nil {", f.Name),
+						"    return offset, err",
+						"} else {",
+						"    offset += n",
+						"}")
 					gf.DeserializeData = append(gf.DeserializeData,
-						fmt.Sprintf("offset += r.%s.DeserializeRead(buf[offset:])", f.Name))
+						fmt.Sprintf("if n, err := r.%s.DeserializeRead(buf[offset:]); err != nil {", f.Name),
+						"    return offset, err",
+						"} else {",
+						"    offset += n",
+						"}")
 					gf.BufSize4ReadExpr = fmt.Sprintf("r.%s.BufSize4Read()", f.Name)
 				}
 				if gf.IsWritable {
 					gf.SerializeData = append(gf.SerializeData,
-						fmt.Sprintf("offset += r.%s.SerializeWrite(buf[offset:])", f.Name))
+						fmt.Sprintf("if n, err := r.%s.SerializeWrite(buf[offset:]); err != nil {", f.Name),
+						"    return offset, err",
+						"} else {",
+						"    offset += n",
+						"}")
 					gf.DeserializeData = append(gf.DeserializeData,
-						fmt.Sprintf("offset += r.%s.DeserializeWrite(buf[offset:])", f.Name))
+						fmt.Sprintf("if n, err := r.%s.DeserializeWrite(buf[offset:]); err != nil {", f.Name),
+						"    return offset, err",
+						"} else {",
+						"    offset += n",
+						"}")
 					gf.BufSize4WriteExpr = fmt.Sprintf("r.%s.BufSize4Write()", f.Name)
 				}
 
@@ -309,10 +430,14 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 				}
 				size := typeSize(base)
 				gf.SerializeData = append(gf.SerializeData,
-					fmt.Sprintf("putUint%d(buf[offset:], uint%d(r.%s))", size*8, size*8, f.Name),
+					fmt.Sprintf("if err := putNumber(buf[offset:], r.%s); err != nil {", f.Name),
+					"    return offset, err",
+					"}",
 					fmt.Sprintf("offset += %d", size))
 				gf.DeserializeData = append(gf.DeserializeData,
-					fmt.Sprintf("r.%s = %s(getUint%d(buf[offset:]))", f.Name, base, size*8),
+					fmt.Sprintf("if err := getNumber(buf[offset:], &r.%s); err != nil {", f.Name),
+					"    return offset, err",
+					"}",
 					fmt.Sprintf("offset += %d", size))
 
 				// Bitfield buffer size is constant - add directly to register
@@ -330,15 +455,15 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 				gf.Decl = fmt.Sprintf("%s %s", f.Name, gf.Type)
 				elemSize := typeSize(elem)
 				gf.SerializeData = append(gf.SerializeData,
-					fmt.Sprintf("for i := 0; i < %s; i++ {", sz),
-					fmt.Sprintf("    putUint%d(buf[offset:], uint%d(r.%s[i]))", elemSize*8, elemSize*8, f.Name),
-					fmt.Sprintf("    offset += %d", elemSize),
-					"}")
+					fmt.Sprintf("if err := putSlice(buf[offset:], r.%s[:]); err != nil {", f.Name),
+					"    return offset, err",
+					"}",
+					fmt.Sprintf("offset += %s * %d", sz, elemSize))
 				gf.DeserializeData = append(gf.DeserializeData,
-					fmt.Sprintf("for i := 0; i < %s; i++ {", sz),
-					fmt.Sprintf("    r.%s[i] = %s(getUint%d(buf[offset:]))", f.Name, elem, elemSize*8),
-					fmt.Sprintf("    offset += %d", elemSize),
-					"}")
+					fmt.Sprintf("if err := getSlice(buf[offset:], r.%s[:]); err != nil {", f.Name),
+					"    return offset, err",
+					"}",
+					fmt.Sprintf("offset += %s * %d", sz, elemSize))
 
 				// Constant array buffer size: array size * element size - add directly to register
 				szInt, _ := strconv.Atoi(sz)
@@ -364,14 +489,14 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 				var bufSizeExpr string
 				if bm != nil {
 					gf.SerializeData = append(gf.SerializeData,
-						fmt.Sprintf("    elems := (r.%s&%s_%s_%s_bm)>>%d", refField, reg.Name, fld.Name, bm.Name, bm.StartBit()),
+						fmt.Sprintf("    elems := (r.%s&%s_%s_%s_bm)>>%d", fld.Name, reg.Name, fld.Name, bm.Name, bm.StartBit()),
 					)
 					gf.DeserializeData = append(gf.DeserializeData,
-						fmt.Sprintf("    elems := (r.%s&%s_%s_%s_bm)>>%d", refField, reg.Name, fld.Name, bm.Name, bm.StartBit()),
+						fmt.Sprintf("    elems := (r.%s&%s_%s_%s_bm)>>%d", fld.Name, reg.Name, fld.Name, bm.Name, bm.StartBit()),
 					)
 					// Variable array buffer size: element size * bitfield value
 					bufSizeExpr = fmt.Sprintf("(int((r.%s&%s_%s_%s_bm)>>%d) * %d)",
-						refField, reg.Name, fld.Name, bm.Name, bm.StartBit(), elemSize)
+						fld.Name, reg.Name, fld.Name, bm.Name, bm.StartBit(), elemSize)
 				} else {
 					gf.SerializeData = append(gf.SerializeData,
 						fmt.Sprintf("    elems := r.%s", refField),
@@ -383,18 +508,34 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 					bufSizeExpr = fmt.Sprintf("(int(r.%s) * %d)", refField, elemSize)
 				}
 				gf.SerializeData = append(gf.SerializeData,
-					"    for i := 0; i < int(elems); i++ {",
-					fmt.Sprintf("        putUint%d(buf[offset:], uint%d(r.%s[i]))", elemSize*8, elemSize*8, f.Name),
-					fmt.Sprintf("        offset += %d", elemSize),
-					"    }")
+					fmt.Sprintf("    if err := putSlice(buf[offset:], r.%s); err != nil {", f.Name),
+					"        return offset, err",
+					"    }",
+					fmt.Sprintf("    offset += int(elems) * %d", elemSize))
 				gf.DeserializeData = append(gf.DeserializeData,
-					fmt.Sprintf("	r.%s = []%s{}", f.Name, elem),
-					"    for i := 0; i < int(elems); i++ {",
-					fmt.Sprintf("        r.%s = append(r.%s, %s(getUint%d(buf[offset:])))", f.Name, f.Name, elem, elemSize*8),
-					fmt.Sprintf("        offset += %d", elemSize),
-					"    }")
+					fmt.Sprintf("    r.%s = make([]%s, int(elems))", f.Name, elem),
+					fmt.Sprintf("    if err := getSlice(buf[offset:], r.%s); err != nil {", f.Name),
+					"        return offset, err",
+					"    }",
+					fmt.Sprintf("    offset += int(elems) * %d", elemSize))
 				gf.SerializeData = append(gf.SerializeData, "}")
 				gf.DeserializeData = append(gf.DeserializeData, "}")
+
+				// Generate consistency checks for variable-length arrays
+				if bm != nil {
+					gf.ConsistencyChecks = append(gf.ConsistencyChecks,
+						fmt.Sprintf("if len(r.%s) != int((r.%s&%s_%s_%s_bm)>>%d) {",
+							f.Name, fld.Name, reg.Name, fld.Name, bm.Name, bm.StartBit()),
+						fmt.Sprintf("    return fmt.Errorf(\"array %s length (%%d) does not match field %s value (%%d)\", len(r.%s), int((r.%s&%s_%s_%s_bm)>>%d))",
+							f.Name, refField, f.Name, fld.Name, reg.Name, fld.Name, bm.Name, bm.StartBit()),
+						"}")
+				} else {
+					gf.ConsistencyChecks = append(gf.ConsistencyChecks,
+						fmt.Sprintf("if len(r.%s) != int(r.%s) {", f.Name, refField),
+						fmt.Sprintf("    return fmt.Errorf(\"array %s length (%%d) does not match field %s value (%%d)\", len(r.%s), int(r.%s))",
+							f.Name, refField, f.Name, refField),
+						"}")
+				}
 
 				if gf.IsReadable {
 					gf.BufSize4ReadExpr = bufSizeExpr
@@ -409,10 +550,14 @@ func GenerateGo(dev *parser.Device, pkg string) (string, error) {
 				gf.Decl = fmt.Sprintf("%s %s", f.Name, elem)
 				size := typeSize(elem)
 				gf.SerializeData = append(gf.SerializeData,
-					fmt.Sprintf("putUint%d(buf[offset:], uint%d(r.%s))", size*8, size*8, f.Name),
+					fmt.Sprintf("if err := putNumber(buf[offset:], r.%s); err != nil {", f.Name),
+					"    return offset, err",
+					"}",
 					fmt.Sprintf("offset += %d", size))
 				gf.DeserializeData = append(gf.DeserializeData,
-					fmt.Sprintf("r.%s = %s(getUint%d(buf[offset:]))", f.Name, elem, size*8),
+					fmt.Sprintf("if err := getNumber(buf[offset:], &r.%s); err != nil {", f.Name),
+					"    return offset, err",
+					"}",
 					fmt.Sprintf("offset += %d", size))
 
 				// Simple type buffer size is constant - add directly to register

@@ -171,10 +171,13 @@ func TestGenerateGoWithRegisterRef(t *testing.T) {
 
 	// Verify that the generated code contains the register reference
 	require.Contains(t, res, "config Config")
-	// In SerializeRead we serialize nested struct by calling DeserializeRead (reads from struct to buffer)
-	require.Contains(t, res, "offset += r.config.DeserializeRead(buf[offset:])")
-	// In DeserializeRead we deserialize nested struct by calling SerializeRead (reads from buffer to struct)
-	require.Contains(t, res, "offset += r.config.SerializeRead(buf[offset:])")
+	// In SerializeRead we serialize nested struct by calling SerializeRead with error handling
+	require.Contains(t, res, "if n, err := r.config.SerializeRead(buf[offset:]); err != nil {")
+	require.Contains(t, res, "offset += n")
+	// In DeserializeRead we deserialize nested struct by calling DeserializeRead with error handling
+	require.Contains(t, res, "if n, err := r.config.DeserializeRead(buf[offset:]); err != nil {")
+	// Check that getNumber uses pointer API
+	require.Contains(t, res, "if err := getNumber(buf[offset:], &r.id); err != nil {")
 }
 
 func TestGenerateCppWithRegisterRefReadWrite(t *testing.T) {
