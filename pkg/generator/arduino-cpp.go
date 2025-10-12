@@ -75,48 +75,38 @@ namespace {{.Namespace}} {
 // Send read-only fields to wire (register read fields -> wire)
 int {{.Name}}::serialize_read(uint8_t* buf, size_t size) const {
 	int offset = 0;
-{{- range .Fields}}
-{{- if .IsReadable}}
-	{{range .SerializeData}}{{.}}
+{{- range .Fields}}{{- if .SerializeReadData}}
+	{{range .SerializeReadData}}{{.}}
 	{{end -}}
-{{- end}}
-{{- end}}
+{{- end}}{{- end}}
 	return offset;
 }
 
 // Send write-only fields to wire (register write fields -> wire)
 int {{.Name}}::serialize_write(uint8_t* buf, size_t size) const{
 	int offset = 0;
-{{- range .Fields}}
-{{- if .IsWritable}}
-	{{range .SerializeData}}{{.}}
-	{{end -}}
-{{- end}}
-{{- end}}
+{{- range .Fields}}{{- if .SerializeWriteData}}
+	{{range .SerializeWriteData}}{{.}}{{end -}}
+{{- end}}{{- end}}
 	return offset;
 }
 
 // Get read-only fields from wire (wire -> the register read fields)
 int {{.Name}}::deserialize_read(uint8_t* buf, size_t size) {
 	int offset = 0;
-{{- range .Fields}}
-{{- if .IsReadable}}
-	{{range .DeserializeData}}{{.}}
+{{- range .Fields}}{{- if .DeserializeReadData}}
+	{{range .DeserializeReadData}}{{.}}
 	{{end -}}
-{{- end}}
-{{- end}}
+{{- end}}{{- end}}
 	return offset;
 }
 
 // Get write-only fields from wire (wire -> the register writable fields)
 int {{.Name}}::deserialize_write(uint8_t* buf, size_t size) {
 	int offset = 0;
-{{- range .Fields}}
-{{- if .IsWritable}}
-	{{range .DeserializeData}}{{.}}
-	{{end -}}
-{{- end}}
-{{- end}}
+{{- range .Fields}}{{- if .DeserializeWriteData}}
+	{{range .DeserializeWriteData}}{{.}}{{end -}}
+{{- end}}{{- end}}
 	return offset;
 }
 
@@ -152,15 +142,17 @@ type CppConstant struct {
 }
 
 type CppField struct {
-	Doc             []string
-	Name            string
-	BitMasks        []string
-	Decl            string
-	IsReadable      bool
-	IsWritable      bool
-	SerializeData   []string
-	DeserializeData []string
-	Trailing        string
+	Doc                  []string
+	Name                 string
+	BitMasks             []string
+	Decl                 string
+	IsReadable           bool
+	IsWritable           bool
+	SerializeReadData    []string // Code for serialize_read function
+	SerializeWriteData   []string // Code for serialize_write function
+	DeserializeReadData  []string // Code for deserialize_read function
+	DeserializeWriteData []string // Code for deserialize_write function
+	Trailing             string
 }
 
 //
@@ -212,19 +204,17 @@ func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName strin
 				refRegName := f.Type.Simple.Name
 				cf.Decl = fmt.Sprintf("%s %s;", refRegName, f.Name)
 
-				// For RegisterRef, we need to call different methods depending on read/write context
-				// The template will filter by IsReadable/IsWritable
-				// For readable fields in send_read_data/receive_read_data
-				// For writable fields in send_write_data/receive_write_data
+				// For RegisterRef, populate the appropriate contexts
 				if cf.IsReadable {
-					cf.SerializeData = append(cf.SerializeData,
+					cf.SerializeReadData = append(cf.SerializeReadData,
 						fmt.Sprintf("{auto res = %s.serialize_read(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
-					cf.DeserializeData = append(cf.DeserializeData,
+					cf.DeserializeReadData = append(cf.DeserializeReadData,
 						fmt.Sprintf("{auto res = %s.deserialize_read(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
-				} else if cf.IsWritable {
-					cf.SerializeData = append(cf.SerializeData,
+				}
+				if cf.IsWritable {
+					cf.SerializeWriteData = append(cf.SerializeWriteData,
 						fmt.Sprintf("{auto res = %s.serialize_write(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
-					cf.DeserializeData = append(cf.DeserializeData,
+					cf.DeserializeWriteData = append(cf.DeserializeWriteData,
 						fmt.Sprintf("{auto res = %s.deserialize_write(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
 				}
 
@@ -256,54 +246,113 @@ func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName strin
 						fmt.Sprintf("static constexpr %s %s_%s_bm = 0x%X;",
 							base, f.Name, bm.Name, mask))
 				}
-				cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name))
-				cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("offset += bigendian::encode(buf + offset, %s);", f.Name))
-				cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name))
-				cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("offset += bigendian::decode(%s, buf + offset);", f.Name))
+				serCode := []string{
+					fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
+					fmt.Sprintf("offset += bigendian::encode(buf + offset, %s);", f.Name),
+				}
+				deserCode := []string{
+					fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
+					fmt.Sprintf("offset += bigendian::decode(%s, buf + offset);", f.Name),
+				}
+				if cf.IsReadable {
+					cf.SerializeReadData = append(cf.SerializeReadData, serCode...)
+					cf.DeserializeReadData = append(cf.DeserializeReadData, deserCode...)
+				}
+				if cf.IsWritable {
+					cf.SerializeWriteData = append(cf.SerializeWriteData, serCode...)
+					cf.DeserializeWriteData = append(cf.DeserializeWriteData, deserCode...)
+				}
 			case f.Type.Array != nil:
 				elem := toCppTypes(f.Type.Array.Type.Name)
 				if f.Type.Array.Size.Constant != nil {
 					sz := *f.Type.Array.Size.Constant
 					cf.Decl = fmt.Sprintf("%s %s[%s];", elem, f.Name, sz)
-					cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name))
-					cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("offset += bigendian::encode(buf + offset, %s);", f.Name))
-					cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name))
-					cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("offset += bigendian::decode(%s, buf + offset);", f.Name))
+					serCode := []string{
+						fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
+						fmt.Sprintf("offset += bigendian::encode(buf + offset, %s);", f.Name),
+					}
+					deserCode := []string{
+						fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
+						fmt.Sprintf("offset += bigendian::decode(%s, buf + offset);", f.Name),
+					}
+					if cf.IsReadable {
+						cf.SerializeReadData = append(cf.SerializeReadData, serCode...)
+						cf.DeserializeReadData = append(cf.DeserializeReadData, deserCode...)
+					}
+					if cf.IsWritable {
+						cf.SerializeWriteData = append(cf.SerializeWriteData, serCode...)
+						cf.DeserializeWriteData = append(cf.DeserializeWriteData, deserCode...)
+					}
 				} else {
 					cf.Decl = fmt.Sprintf("%s* %s;", elem, f.Name)
 					szFieldName := *f.Type.Array.Size.Variable
 					field, bm := reg.FindFieldByName(szFieldName, len(cr.Fields))
 					if bm != nil {
 						// this is the bit mask field
-						cf.SerializeData = append(cf.SerializeData, "{")
-						cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("    %s elems = (%s&%s)>>%d;", toCppTypes(field.Type.Bitfield.Base),
-							field.Name, fmt.Sprintf("%s_%s_bm", field.Name, bm.Name), bm.StartBit()))
-						cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("    if (offset + sizeof(%s)*elems > size) return -1;", elem))
-						cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("    offset += bigendian::encode_varray(buf + offset, %s, elems);", f.Name))
-						cf.SerializeData = append(cf.SerializeData, "}")
-
-						cf.DeserializeData = append(cf.DeserializeData, "{")
-						cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("    %s elems = (%s&%s)>>%d;", toCppTypes(field.Type.Bitfield.Base),
-							field.Name, fmt.Sprintf("%s_%s_bm", field.Name, bm.Name), bm.StartBit()))
-						cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("    if (offset + sizeof(%s)*elems > size) return -1;", elem))
-						cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("    offset += bigendian::decode_varray(%s, buf + offset, elems);", f.Name))
-						cf.DeserializeData = append(cf.DeserializeData, "}")
+						serCode := []string{
+							"{",
+							fmt.Sprintf("    %s elems = (%s&%s)>>%d;", toCppTypes(field.Type.Bitfield.Base),
+								field.Name, fmt.Sprintf("%s_%s_bm", field.Name, bm.Name), bm.StartBit()),
+							fmt.Sprintf("    if (offset + sizeof(%s)*elems > size) return -1;", elem),
+							fmt.Sprintf("    offset += bigendian::encode_varray(buf + offset, %s, elems);", f.Name),
+							"}",
+						}
+						deserCode := []string{
+							"{",
+							fmt.Sprintf("    %s elems = (%s&%s)>>%d;", toCppTypes(field.Type.Bitfield.Base),
+								field.Name, fmt.Sprintf("%s_%s_bm", field.Name, bm.Name), bm.StartBit()),
+							fmt.Sprintf("    if (offset + sizeof(%s)*elems > size) return -1;", elem),
+							fmt.Sprintf("    offset += bigendian::decode_varray(%s, buf + offset, elems);", f.Name),
+							"}",
+						}
+						if cf.IsReadable {
+							cf.SerializeReadData = append(cf.SerializeReadData, serCode...)
+							cf.DeserializeReadData = append(cf.DeserializeReadData, deserCode...)
+						}
+						if cf.IsWritable {
+							cf.SerializeWriteData = append(cf.SerializeWriteData, serCode...)
+							cf.DeserializeWriteData = append(cf.DeserializeWriteData, deserCode...)
+						}
 					} else {
 						// this is the regular field
-						cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("if (offset + sizeof(%s)*%s > size) return -1;", elem, field.Name))
-						cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("offset += bigendian::encode_varray(buf + offset, %s, %s);", f.Name, field.Name))
-						cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("if (offset + sizeof(%s)*%s > size) return -1;", elem, field.Name))
-						cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("offset += bigendian::decode_varray(%s, buf + offset, %s);", f.Name, field.Name))
+						serCode := []string{
+							fmt.Sprintf("if (offset + sizeof(%s)*%s > size) return -1;", elem, field.Name),
+							fmt.Sprintf("offset += bigendian::encode_varray(buf + offset, %s, %s);", f.Name, field.Name),
+						}
+						deserCode := []string{
+							fmt.Sprintf("if (offset + sizeof(%s)*%s > size) return -1;", elem, field.Name),
+							fmt.Sprintf("offset += bigendian::decode_varray(%s, buf + offset, %s);", f.Name, field.Name),
+						}
+						if cf.IsReadable {
+							cf.SerializeReadData = append(cf.SerializeReadData, serCode...)
+							cf.DeserializeReadData = append(cf.DeserializeReadData, deserCode...)
+						}
+						if cf.IsWritable {
+							cf.SerializeWriteData = append(cf.SerializeWriteData, serCode...)
+							cf.DeserializeWriteData = append(cf.DeserializeWriteData, deserCode...)
+						}
 					}
 				}
 
 			case f.Type.Simple != nil:
 				elem := toCppTypes(f.Type.Simple.Name)
 				cf.Decl = fmt.Sprintf("%s %s;", elem, f.Name)
-				cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name))
-				cf.SerializeData = append(cf.SerializeData, fmt.Sprintf("offset += bigendian::encode(buf + offset, %s);", f.Name))
-				cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name))
-				cf.DeserializeData = append(cf.DeserializeData, fmt.Sprintf("offset += bigendian::decode(%s, buf + offset);", f.Name))
+				serCode := []string{
+					fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
+					fmt.Sprintf("offset += bigendian::encode(buf + offset, %s);", f.Name),
+				}
+				deserCode := []string{
+					fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
+					fmt.Sprintf("offset += bigendian::decode(%s, buf + offset);", f.Name),
+				}
+				if cf.IsReadable {
+					cf.SerializeReadData = append(cf.SerializeReadData, serCode...)
+					cf.DeserializeReadData = append(cf.DeserializeReadData, deserCode...)
+				}
+				if cf.IsWritable {
+					cf.SerializeWriteData = append(cf.SerializeWriteData, serCode...)
+					cf.DeserializeWriteData = append(cf.DeserializeWriteData, deserCode...)
+				}
 			default:
 				cf.Decl = fmt.Sprintf("/* unsupported field %s */", f.Name)
 			}
