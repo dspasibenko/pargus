@@ -29,7 +29,7 @@ import (
 {{range .Doc}}{{.}}
 {{end -}}
 type {{.Name}} struct {
-{{- range .fields}}
+{{- range .Fields}}
     {{- range .Doc}}
     {{.}}
     {{- end}}
@@ -40,10 +40,10 @@ type {{.Name}} struct {
 {{- range .Constants}}
 {{range .Doc}}{{.}}
 {{end -}}
-const {{.Name}} {{.tp}} = {{.Value}}
+const {{.Name}} {{.Type}} = {{.Value}}
 {{- end}}
 
-{{- range .fields}}
+{{- range .Fields}}
 {{- range .BitMasks}}
 {{.}}
 {{- end}}
@@ -54,15 +54,15 @@ const {{.Name}} {{.tp}} = {{.Value}}
 {{- range .Registers}}
 {{ $regName := .Name }}
 // ================= {{.Name}} implementation =================
-// The {{.Name}} register's id
-func (r *{{.Name}}) id() uint8 {
-	return {{.id}}
+// The {{.Name}} register's ID
+func (r *{{.Name}}) ID() uint8 {
+	return {{.ID}}
 }
 
 // BufSize4Read returns the buffer size required for read fields serialization
 func (r *{{.Name}}) BufSize4Read() int {
     size := {{.BufSize4ReadConst}}
-{{- range .fields}}
+{{- range .Fields}}
 {{- if .IsReadable}}
 {{- if .BufSize4ReadExpr}}
     size += {{.BufSize4ReadExpr}}
@@ -75,7 +75,7 @@ func (r *{{.Name}}) BufSize4Read() int {
 // BufSize4Write returns the buffer size required for write fields serialization
 func (r *{{.Name}}) BufSize4Write() int {
     size := {{.BufSize4WriteConst}}
-{{- range .fields}}
+{{- range .Fields}}
 {{- if .IsWritable}}
 {{- if .BufSize4WriteExpr}}
     size += {{.BufSize4WriteExpr}}
@@ -87,7 +87,7 @@ func (r *{{.Name}}) BufSize4Write() int {
 
 // Check validates the consistency of variable-length arrays with their size fields
 func (r *{{.Name}}) Check() error {
-{{- range .fields}}
+{{- range .Fields}}
 {{- range .ConsistencyChecks}}
     {{.}}
 {{- end}}
@@ -101,7 +101,7 @@ func (r *{{.Name}}) SerializeRead(buf []byte) (int, error) {
         return 0, err
     }
     offset := 0
-{{- range .fields}}{{- if .SerializeReadData}}
+{{- range .Fields}}{{- if .SerializeReadData}}
     {{range .SerializeReadData}}{{.}}
     {{end -}}
 {{- end}}{{- end}}
@@ -114,7 +114,7 @@ func (r *{{.Name}}) SerializeWrite(buf []byte) (int, error) {
         return 0, err
     }
     offset := 0
-{{- range .fields}}{{- if .SerializeWriteData}}
+{{- range .Fields}}{{- if .SerializeWriteData}}
     {{range .SerializeWriteData}}{{.}}
     {{end -}}
 {{- end}}{{- end}}
@@ -124,7 +124,7 @@ func (r *{{.Name}}) SerializeWrite(buf []byte) (int, error) {
 // DeserializeRead deserializes read data into the register
 func (r *{{.Name}}) DeserializeRead(buf []byte) (int, error) {
     offset := 0
-{{- range .fields}}{{- if .DeserializeReadData}}
+{{- range .Fields}}{{- if .DeserializeReadData}}
     {{range .DeserializeReadData}}{{.}}
     {{end -}}
 {{- end}}{{- end}}
@@ -134,21 +134,21 @@ func (r *{{.Name}}) DeserializeRead(buf []byte) (int, error) {
 // DeserializeWrite deserializes write data into the register
 func (r *{{.Name}}) DeserializeWrite(buf []byte) (int, error) {
     offset := 0
-{{- range .fields}}{{- if .DeserializeWriteData}}
+{{- range .Fields}}{{- if .DeserializeWriteData}}
     {{range .DeserializeWriteData}}{{.}}
     {{end -}}
 {{- end}}{{- end}}
     return offset, nil
 }
 
-{{- range .fields}}
+{{- range .Fields}}
 // Get{{.CapitalizedName}} returns value for {{.Name}}
-func (r *{{$regName}}) Get{{.CapitalizedName}}() {{.tp}} {
+func (r *{{$regName}}) Get{{.CapitalizedName}}() {{.Type}} {
     return r.{{.Name}}
 }
 
 // Set{{.CapitalizedName}} sets value for {{.Name}}
-func (r *{{$regName}}) Set{{.CapitalizedName}}(v {{.tp}}) {
+func (r *{{$regName}}) Set{{.CapitalizedName}}(v {{.Type}}) {
     r.{{.Name}} = v
 }
 {{- end}}
