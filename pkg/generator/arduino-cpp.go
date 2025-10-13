@@ -40,9 +40,9 @@ struct {{.Name}} {
     {{- range .Doc}}
     {{.}}
     {{- end}}
-    static constexpr {{.Type}} {{.Name}} = {{.Value}};
+    static constexpr {{.tp}} {{.Name}} = {{.Value}};
 {{- end}}
-{{- range .Fields}}
+{{- range .fields}}
 	{{- range .BitMasks}}
     {{.}}
     {{- end}}
@@ -75,7 +75,7 @@ namespace {{.Namespace}} {
 // Send read-only fields to wire (register read fields -> wire)
 int {{.Name}}::serialize_read(uint8_t* buf, size_t size) const {
 	int offset = 0;
-{{- range .Fields}}{{- if .SerializeReadData}}
+{{- range .fields}}{{- if .SerializeReadData}}
 	{{range .SerializeReadData}}{{.}}
 	{{end -}}
 {{- end}}{{- end}}
@@ -85,7 +85,7 @@ int {{.Name}}::serialize_read(uint8_t* buf, size_t size) const {
 // Send write-only fields to wire (register write fields -> wire)
 int {{.Name}}::serialize_write(uint8_t* buf, size_t size) const{
 	int offset = 0;
-{{- range .Fields}}{{- if .SerializeWriteData}}
+{{- range .fields}}{{- if .SerializeWriteData}}
 	{{range .SerializeWriteData}}{{.}}{{end -}}
 {{- end}}{{- end}}
 	return offset;
@@ -94,7 +94,7 @@ int {{.Name}}::serialize_write(uint8_t* buf, size_t size) const{
 // Get read-only fields from wire (wire -> the register read fields)
 int {{.Name}}::deserialize_read(uint8_t* buf, size_t size) {
 	int offset = 0;
-{{- range .Fields}}{{- if .DeserializeReadData}}
+{{- range .fields}}{{- if .DeserializeReadData}}
 	{{range .DeserializeReadData}}{{.}}
 	{{end -}}
 {{- end}}{{- end}}
@@ -104,7 +104,7 @@ int {{.Name}}::deserialize_read(uint8_t* buf, size_t size) {
 // Get write-only fields from wire (wire -> the register writable fields)
 int {{.Name}}::deserialize_write(uint8_t* buf, size_t size) {
 	int offset = 0;
-{{- range .Fields}}{{- if .DeserializeWriteData}}
+{{- range .fields}}{{- if .DeserializeWriteData}}
 	{{range .DeserializeWriteData}}{{.}}{{end -}}
 {{- end}}{{- end}}
 	return offset;
