@@ -207,15 +207,15 @@ func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName strin
 				// For RegisterRef, populate the appropriate contexts
 				if cf.IsReadable {
 					cf.SerializeReadData = append(cf.SerializeReadData,
-						fmt.Sprintf("{auto res = %s.serialize_read(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
+						fmt.Sprintf("{auto res = this->%s.serialize_read(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
 					cf.DeserializeReadData = append(cf.DeserializeReadData,
-						fmt.Sprintf("{auto res = %s.deserialize_read(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
+						fmt.Sprintf("{auto res = this->%s.deserialize_read(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
 				}
 				if cf.IsWritable {
 					cf.SerializeWriteData = append(cf.SerializeWriteData,
-						fmt.Sprintf("{auto res = %s.serialize_write(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
+						fmt.Sprintf("{auto res = this->%s.serialize_write(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
 					cf.DeserializeWriteData = append(cf.DeserializeWriteData,
-						fmt.Sprintf("{auto res = %s.deserialize_write(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
+						fmt.Sprintf("{auto res = this->%s.deserialize_write(buf + offset, size - offset); if (res < 0) return res; offset += res;}", f.Name))
 				}
 
 			case f.Type.Bitfield != nil:
@@ -247,12 +247,12 @@ func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName strin
 							base, f.Name, bm.Name, mask))
 				}
 				serCode := []string{
-					fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
-					fmt.Sprintf("offset += bigendian::encode(buf + offset, %s);", f.Name),
+					fmt.Sprintf("if (offset + sizeof(this->%s) > size) return -1;", f.Name),
+					fmt.Sprintf("offset += bigendian::encode(buf + offset, this->%s);", f.Name),
 				}
 				deserCode := []string{
-					fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
-					fmt.Sprintf("offset += bigendian::decode(%s, buf + offset);", f.Name),
+					fmt.Sprintf("if (offset + sizeof(this->%s) > size) return -1;", f.Name),
+					fmt.Sprintf("offset += bigendian::decode(this->%s, buf + offset);", f.Name),
 				}
 				if cf.IsReadable {
 					cf.SerializeReadData = append(cf.SerializeReadData, serCode...)
@@ -268,12 +268,12 @@ func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName strin
 					sz := *f.Type.Array.Size.Constant
 					cf.Decl = fmt.Sprintf("%s %s[%s];", elem, f.Name, sz)
 					serCode := []string{
-						fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
-						fmt.Sprintf("offset += bigendian::encode(buf + offset, %s);", f.Name),
+						fmt.Sprintf("if (offset + sizeof(this->%s) > size) return -1;", f.Name),
+						fmt.Sprintf("offset += bigendian::encode(buf + offset, this->%s);", f.Name),
 					}
 					deserCode := []string{
-						fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
-						fmt.Sprintf("offset += bigendian::decode(%s, buf + offset);", f.Name),
+						fmt.Sprintf("if (offset + sizeof(this->%s) > size) return -1;", f.Name),
+						fmt.Sprintf("offset += bigendian::decode(this->%s, buf + offset);", f.Name),
 					}
 					if cf.IsReadable {
 						cf.SerializeReadData = append(cf.SerializeReadData, serCode...)
@@ -291,18 +291,18 @@ func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName strin
 						// this is the bit mask field
 						serCode := []string{
 							"{",
-							fmt.Sprintf("    %s elems = (%s&%s)>>%d;", toCppTypes(field.Type.Bitfield.Base),
+							fmt.Sprintf("    %s elems = (this->%s&%s)>>%d;", toCppTypes(field.Type.Bitfield.Base),
 								field.Name, fmt.Sprintf("%s_%s_bm", field.Name, bm.Name), bm.StartBit()),
 							fmt.Sprintf("    if (offset + sizeof(%s)*elems > size) return -1;", elem),
-							fmt.Sprintf("    offset += bigendian::encode_varray(buf + offset, %s, elems);", f.Name),
+							fmt.Sprintf("    offset += bigendian::encode_varray(buf + offset, this->%s, elems);", f.Name),
 							"}",
 						}
 						deserCode := []string{
 							"{",
-							fmt.Sprintf("    %s elems = (%s&%s)>>%d;", toCppTypes(field.Type.Bitfield.Base),
+							fmt.Sprintf("    %s elems = (this->%s&%s)>>%d;", toCppTypes(field.Type.Bitfield.Base),
 								field.Name, fmt.Sprintf("%s_%s_bm", field.Name, bm.Name), bm.StartBit()),
 							fmt.Sprintf("    if (offset + sizeof(%s)*elems > size) return -1;", elem),
-							fmt.Sprintf("    offset += bigendian::decode_varray(%s, buf + offset, elems);", f.Name),
+							fmt.Sprintf("    offset += bigendian::decode_varray(this->%s, buf + offset, elems);", f.Name),
 							"}",
 						}
 						if cf.IsReadable {
@@ -316,12 +316,12 @@ func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName strin
 					} else {
 						// this is the regular field
 						serCode := []string{
-							fmt.Sprintf("if (offset + sizeof(%s)*%s > size) return -1;", elem, field.Name),
-							fmt.Sprintf("offset += bigendian::encode_varray(buf + offset, %s, %s);", f.Name, field.Name),
+							fmt.Sprintf("if (offset + sizeof(%s)*this->%s > size) return -1;", elem, field.Name),
+							fmt.Sprintf("offset += bigendian::encode_varray(buf + offset, this->%s, this->%s);", f.Name, field.Name),
 						}
 						deserCode := []string{
-							fmt.Sprintf("if (offset + sizeof(%s)*%s > size) return -1;", elem, field.Name),
-							fmt.Sprintf("offset += bigendian::decode_varray(%s, buf + offset, %s);", f.Name, field.Name),
+							fmt.Sprintf("if (offset + sizeof(%s)*this->%s > size) return -1;", elem, field.Name),
+							fmt.Sprintf("offset += bigendian::decode_varray(this->%s, buf + offset, this->%s);", f.Name, field.Name),
 						}
 						if cf.IsReadable {
 							cf.SerializeReadData = append(cf.SerializeReadData, serCode...)
@@ -338,12 +338,12 @@ func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName strin
 				elem := toCppTypes(f.Type.Simple.Name)
 				cf.Decl = fmt.Sprintf("%s %s;", elem, f.Name)
 				serCode := []string{
-					fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
-					fmt.Sprintf("offset += bigendian::encode(buf + offset, %s);", f.Name),
+					fmt.Sprintf("if (offset + sizeof(this->%s) > size) return -1;", f.Name),
+					fmt.Sprintf("offset += bigendian::encode(buf + offset, this->%s);", f.Name),
 				}
 				deserCode := []string{
-					fmt.Sprintf("if (offset + sizeof(%s) > size) return -1;", f.Name),
-					fmt.Sprintf("offset += bigendian::decode(%s, buf + offset);", f.Name),
+					fmt.Sprintf("if (offset + sizeof(this->%s) > size) return -1;", f.Name),
+					fmt.Sprintf("offset += bigendian::decode(this->%s, buf + offset);", f.Name),
 				}
 				if cf.IsReadable {
 					cf.SerializeReadData = append(cf.SerializeReadData, serCode...)

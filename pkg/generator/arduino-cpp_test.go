@@ -142,8 +142,8 @@ func TestGenerateCppWithRegisterRef(t *testing.T) {
 
 	// Verify that the generated code contains the register reference
 	require.Contains(t, hpp, "Config config;")
-	require.Contains(t, cpp, "{auto res = config.serialize_read(buf + offset, size - offset); if (res < 0) return res; offset += res;}")
-	require.Contains(t, cpp, "{auto res = config.deserialize_read(buf + offset, size - offset); if (res < 0) return res; offset += res;}")
+	require.Contains(t, cpp, "{auto res = this->config.serialize_read(buf + offset, size - offset); if (res < 0) return res; offset += res;}")
+	require.Contains(t, cpp, "{auto res = this->config.deserialize_read(buf + offset, size - offset); if (res < 0) return res; offset += res;}")
 }
 
 func TestGenerateGoWithRegisterRef(t *testing.T) {
@@ -205,9 +205,9 @@ func TestGenerateCppWithRegisterRefReadWrite(t *testing.T) {
 
 	// Verify that read_config uses serialize_read
 	require.Contains(t, hpp, "Config read_config;")
-	require.Contains(t, cpp, "read_config.serialize_read")
+	require.Contains(t, cpp, "this->read_config.serialize_read")
 
 	// Verify that write_config uses serialize_write
 	require.Contains(t, hpp, "Config write_config;")
-	require.Contains(t, cpp, "write_config.serialize_write")
+	require.Contains(t, cpp, "this->write_config.serialize_write")
 }
