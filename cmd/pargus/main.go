@@ -111,7 +111,10 @@ func main() {
 
 		hppFileName := outputBase + ".h"
 		cppFileName := outputBase + ".cpp"
-		hpp, cpp, err := generator.GenerateHppCpp(device, *namespace, strings.ReplaceAll(hppFileName, ".", "_"), hppFileName)
+
+		// Use only the base filename (without directory path) for includes and guards
+		baseHppFileName := filepath.Base(hppFileName)
+		hpp, cpp, err := generator.GenerateHppCpp(device, *namespace, strings.ReplaceAll(baseHppFileName, ".", "_"), baseHppFileName)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating code: %v\n", err)
 			os.Exit(1)
