@@ -45,8 +45,8 @@ type RegisterBody struct {
 }
 
 type BodyItem struct {
-	Constant *Constant `@@`
-	Field    *Field    `| @@`
+	Field    *Field    `@@`
+	Constant *Constant `| @@`
 }
 
 type Constant struct {
