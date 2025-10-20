@@ -32,6 +32,8 @@ namespace {{.Namespace}} {
 static constexpr uint8_t Reg_{{.Name}}_ID = {{.Number}};
 {{- end}}
 
+static constexpr uint8_t Max_Reg_ID = {{.MaxRegisterId}};
+
 {{- range .Registers}}
 {{range .Doc}}{{.}}
 {{end -}}
@@ -119,11 +121,12 @@ int {{.Name}}::deserialize_write(uint8_t* buf, size_t size) {
 //
 
 type CppDevice struct {
-	Doc         []string
-	Namespace   string
-	Identifier  string
-	HppFileName string
-	Registers   []CppRegister
+	Doc           []string
+	Namespace     string
+	Identifier    string
+	HppFileName   string
+	Registers     []CppRegister
+	MaxRegisterId int
 }
 
 type CppRegister struct {
@@ -173,6 +176,7 @@ func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName strin
 	out.Doc = flattenComments(dev.Doc)
 	for _, reg := range dev.Registers {
 		num, _ := strconv.ParseInt(reg.NumberStr, 0, 64)
+		out.MaxRegisterId = max(out.MaxRegisterId, int(num))
 		cr := CppRegister{
 			Name:   reg.Name,
 			Number: int(num),
