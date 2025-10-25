@@ -56,8 +56,8 @@ struct {{.Name}} {
 
 	int serialize_read(uint8_t* buf, size_t size) const;
 	int serialize_write(uint8_t* buf, size_t size) const;
-	int deserialize_read(uint8_t* buf, size_t size);
-	int deserialize_write(uint8_t* buf, size_t size);
+	int deserialize_read(const uint8_t* buf, size_t size);
+	int deserialize_write(const uint8_t* buf, size_t size);
 };
 {{- end}}
 } // namespace {{.Namespace}}
@@ -94,7 +94,7 @@ int {{.Name}}::serialize_write(uint8_t* buf, size_t size) const{
 }
 
 // Get read-only fields from wire (wire -> the register read fields)
-int {{.Name}}::deserialize_read(uint8_t* buf, size_t size) {
+int {{.Name}}::deserialize_read(const uint8_t* buf, size_t size) {
 	int offset = 0;
 {{- range .Fields}}{{- if .DeserializeReadData}}
 	{{range .DeserializeReadData}}{{.}}
@@ -104,7 +104,7 @@ int {{.Name}}::deserialize_read(uint8_t* buf, size_t size) {
 }
 
 // Get write-only fields from wire (wire -> the register writable fields)
-int {{.Name}}::deserialize_write(uint8_t* buf, size_t size) {
+int {{.Name}}::deserialize_write(const uint8_t* buf, size_t size) {
 	int offset = 0;
 {{- range .Fields}}{{- if .DeserializeWriteData}}
 	{{range .DeserializeWriteData}}{{.}}{{end -}}
