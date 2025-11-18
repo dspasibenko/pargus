@@ -84,7 +84,7 @@ func TestGenerateCppWithBitfieldComments(t *testing.T) {
 	device, err := parser.Parse(input)
 	require.NoError(t, err)
 
-	hpp, cpp, err := GenerateHppCpp(device, "test", "test_h", "test.h")
+	hpp, cpp, err := GenerateHppCpp(device, "test", "test_h")
 	require.NoError(t, err)
 	fmt.Println("=== HPP ===")
 	fmt.Println(hpp)
@@ -133,7 +133,7 @@ func TestGenerateCppWithRegisterRef(t *testing.T) {
 	device, err := parser.Parse(input)
 	require.NoError(t, err)
 
-	hpp, cpp, err := GenerateHppCpp(device, "test", "test_h", "test.h")
+	hpp, cpp, err := GenerateHppCpp(device, "test", "test_h")
 	require.NoError(t, err)
 	fmt.Println("=== HPP ===")
 	fmt.Println(hpp)
@@ -196,7 +196,7 @@ func TestGenerateCppWithRegisterRefReadWrite(t *testing.T) {
 	device, err := parser.Parse(input)
 	require.NoError(t, err)
 
-	hpp, cpp, err := GenerateHppCpp(device, "test", "test_h", "test.h")
+	hpp, cpp, err := GenerateHppCpp(device, "test", "test_h")
 	require.NoError(t, err)
 	fmt.Println("=== HPP ===")
 	fmt.Println(hpp)

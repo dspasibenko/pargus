@@ -17,8 +17,7 @@ import (
 const hppTemplate = `
 // This is auto-generated file. DO NOT EDIT. Use pargus compiler to regenerate it. 
 
-#ifndef __{{.Identifier}}__
-#define __{{.Identifier}}__
+#pragma once
 
 #include <Arduino.h>
  
@@ -61,7 +60,6 @@ struct {{.Name}} {
 };
 {{- end}}
 } // namespace {{.Namespace}}
-#endif // __{{.Identifier}}__
 `
 
 const cppTemplate = `
@@ -123,7 +121,6 @@ int {{.Name}}::deserialize_write(const uint8_t* buf, size_t size) {
 type CppDevice struct {
 	Doc           []string
 	Namespace     string
-	Identifier    string
 	HppFileName   string
 	Registers     []CppRegister
 	MaxRegisterId int
@@ -162,7 +159,7 @@ type CppField struct {
 // Public entry
 //
 
-func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName string) (string, string, error) {
+func GenerateHppCpp(dev *parser.Device, namespace, hppFileName string) (string, string, error) {
 	tplHpp, err := template.New("hpp").Parse(hppTemplate)
 	if err != nil {
 		return "", "", err
@@ -172,7 +169,7 @@ func GenerateHppCpp(dev *parser.Device, namespace, identifier, hppFileName strin
 		return "", "", err
 	}
 
-	out := CppDevice{Namespace: namespace, Identifier: identifier, HppFileName: hppFileName}
+	out := CppDevice{Namespace: namespace, HppFileName: hppFileName}
 	out.Doc = flattenComments(dev.Doc)
 	for _, reg := range dev.Registers {
 		num, _ := strconv.ParseInt(reg.NumberStr, 0, 64)

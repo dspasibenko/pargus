@@ -3,12 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-
 	"github.com/dspasibenko/pargus/pkg/generator"
 	"github.com/dspasibenko/pargus/pkg/parser"
+	"os"
+	"path/filepath"
 )
 
 func main() {
@@ -114,7 +112,7 @@ func main() {
 
 		// Use only the base filename (without directory path) for includes and guards
 		baseHppFileName := filepath.Base(hppFileName)
-		hpp, cpp, err := generator.GenerateHppCpp(device, *namespace, strings.ReplaceAll(baseHppFileName, ".", "_"), baseHppFileName)
+		hpp, cpp, err := generator.GenerateHppCpp(device, *namespace, baseHppFileName)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error generating code: %v\n", err)
 			os.Exit(1)
